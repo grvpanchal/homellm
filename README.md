@@ -114,6 +114,13 @@ The node agent checks every 30 seconds (`watchdog` in `node.yaml`):
 
 Alerts go to the dashboard's event list and to the desktop through `notify-send`. Everything restarts through systemd (`Restart=always`).
 
+## GPU fan control
+
+Passive datacenter GPUs (Tesla P100/P40) need add-on fans. [`fan-control/`](fan-control/README.md) is a separate
+root service that drives them from GPU temperature, as quietly as possible, with fail-safes: missing sensors set
+every fan to full speed, and stopping the service hands the fans back to the BIOS. Each host has its own config in
+`fan-control/hosts/`. Install with `sudo fan-control/install.sh`.
+
 ## Commands
 
 ```bash
