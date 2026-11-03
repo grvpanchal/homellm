@@ -1,0 +1,14 @@
+[Unit]
+Description=homellm LiteLLM gateway (OpenAI-compatible API + admin UI on :4000)
+After=network-online.target
+
+[Service]
+WorkingDirectory=%h/.local/share/homellm
+ExecStart=%h/.local/share/homellm/litellm-venv/bin/litellm --config %h/.config/homellm/litellm.yaml --host 0.0.0.0 --port 4000
+EnvironmentFile=%h/.config/homellm/secrets.env
+Environment=PATH=%h/.local/share/homellm/litellm-venv/bin:/usr/local/bin:/usr/bin:/bin
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target

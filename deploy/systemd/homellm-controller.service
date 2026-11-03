@@ -1,0 +1,12 @@
+[Unit]
+Description=homellm controller + dashboard (:8780)
+After=network-online.target homellm-litellm.service
+
+[Service]
+ExecStart=%h/.local/share/homellm/venv/bin/homellm controller
+EnvironmentFile=%h/.config/homellm/secrets.env
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

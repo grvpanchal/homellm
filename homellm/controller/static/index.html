@@ -1,0 +1,299 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>homellm</title>
+<style>
+  :root {
+    --bg: #f5f6f8; --panel: #fff; --text: #1b1f24; --muted: #687280; --border: #dde1e6;
+    --accent: #2563eb; --good: #15803d; --warn: #b45309; --bad: #b91c1c; --bar: #e7eaee;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #0f1216; --panel: #181c22; --text: #e5e7ea; --muted: #98a1ac; --border: #2a3038;
+      --accent: #60a5fa; --good: #4ade80; --warn: #fbbf24; --bad: #f87171; --bar: #262c34; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 12px 20px;
+    background: var(--panel); border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 2; }
+  header h1 { font-size: 17px; margin: 0 8px 0 0; }
+  .pill { font-size: 12px; padding: 2px 10px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); white-space: nowrap; }
+  .pill.ok { color: var(--good); border-color: var(--good); } .pill.bad { color: var(--bad); border-color: var(--bad); }
+  .pill.warn { color: var(--warn); border-color: var(--warn); }
+  .spacer { flex: 1; }
+  button, input, select, textarea { font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--border);
+    border-radius: 6px; padding: 5px 10px; }
+  button { cursor: pointer; background: var(--panel); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.danger { color: var(--bad); }
+  button:disabled { opacity: .5; cursor: default; }
+  a { color: var(--accent); }
+  main { padding: 18px 20px; max-width: 1400px; margin: 0 auto; display: grid; gap: 18px; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 8px; }
+  .grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; }
+  .card h3 { margin: 0; font-size: 16px; display: flex; align-items: center; gap: 8px; }
+  .sub { color: var(--muted); font-size: 12px; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 10px; }
+  .meter { margin-top: 8px; font-size: 12px; }
+  .meter .lbl { display: flex; justify-content: space-between; color: var(--muted); }
+  .meter .track { height: 6px; background: var(--bar); border-radius: 3px; overflow: hidden; margin-top: 2px; }
+  .meter .fill { height: 100%; background: var(--accent); }
+  .meter .fill.hot { background: var(--warn); } .meter .fill.crit { background: var(--bad); }
+  .warn-text { color: var(--warn); font-size: 12px; margin-top: 6px; }
+  .err-text { color: var(--bad); font-size: 12px; margin-top: 6px; word-break: break-word; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  td, th { text-align: left; padding: 5px 6px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { color: var(--muted); font-weight: 500; }
+  #events { max-height: 260px; overflow-y: auto; font: 12px/1.5 ui-monospace, monospace; }
+  #events div.alert { color: var(--warn); }
+  dialog { border: 1px solid var(--border); border-radius: 12px; background: var(--panel); color: var(--text);
+    width: min(900px, 95vw); max-height: 88vh; padding: 18px 20px; }
+  dialog::backdrop { background: rgba(0,0,0,.45); }
+  .form { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; margin-top: 8px; }
+  .form label { display: flex; flex-direction: column; font-size: 12px; color: var(--muted); gap: 2px; }
+  .form label.wide { grid-column: 1 / -1; }
+  pre { white-space: pre-wrap; font-size: 12px; background: var(--bg); padding: 10px; border-radius: 8px; max-height: 50vh; overflow: auto; }
+  #login { max-width: 380px; margin: 12vh auto; }
+  .stat { font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  @media (max-width: 480px) { .grid { grid-template-columns: 1fr; } main, header { padding-left: 16px; padding-right: 16px; } }
+</style>
+</head>
+<body>
+<div id="login" class="card" hidden>
+  <h3>homellm</h3>
+  <p class="sub">Enter the admin token (HOMELLM_ADMIN_TOKEN in ~/.config/homellm/secrets.env).</p>
+  <form id="loginForm" class="row"><input id="tokenInput" type="password" style="flex:1" placeholder="admin token" autofocus><button class="primary">Sign in</button></form>
+  <div id="loginErr" class="err-text"></div>
+</div>
+
+<div id="appView" hidden>
+<header>
+  <h1>homellm</h1>
+  <span id="litellmPill" class="pill">LiteLLM …</span>
+  <span id="tunnelPill" class="pill">tunnel …</span>
+  <span id="scanInfo" class="sub"></span>
+  <span class="spacer"></span>
+  <button id="scanBtn">Scan LAN</button>
+  <button id="addNodeBtn">Add node</button>
+  <a id="litellmLink" target="_blank" rel="noopener"><button>LiteLLM UI</button></a>
+  <button id="logoutBtn">Sign out</button>
+</header>
+<main>
+  <section>
+    <h2>Nodes</h2>
+    <div id="nodes" class="grid"></div>
+  </section>
+  <section class="card">
+    <h2>Speed test (through LiteLLM)</h2>
+    <div class="row">
+      <select id="testModel"></select>
+      <input id="testPrompt" style="flex:1;min-width:200px" value="Write a 150-word story about a lighthouse keeper.">
+      <button id="testBtn" class="primary">Run</button>
+    </div>
+    <div id="testOut" class="row"></div>
+  </section>
+  <section class="card">
+    <h2>Events</h2>
+    <div id="events"></div>
+  </section>
+</main>
+</div>
+
+<dialog id="modelsDlg">
+  <div class="row" style="margin-top:0"><h3 id="modelsTitle" style="margin:0">Models</h3><span class="spacer"></span><button onclick="modelsDlg.close()">Close</button></div>
+  <h2 style="margin-top:14px">Profiles</h2>
+  <table id="profilesTbl"></table>
+  <h2 style="margin-top:14px">New profile</h2>
+  <form id="profileForm" class="form">
+    <label>Name<input name="name" required placeholder="qwen3-14b"></label>
+    <label>Backend<select name="backend"></select></label>
+    <label class="wide">Model (LM Studio key or GGUF file)<input name="model" required list="modelList"></label>
+    <label>Context<input name="context" type="number" placeholder="32768"></label>
+    <label>Parallel<input name="parallel" type="number" placeholder="1"></label>
+    <label class="wide">Extra llama-server args (llamacpp only, space-separated)<input name="args" placeholder="--cache-type-k q8_0 --cache-type-v q8_0 --flash-attn on"></label>
+    <div><button class="primary">Save profile</button></div>
+  </form>
+  <datalist id="modelList"></datalist>
+  <h2 style="margin-top:14px">Models on disk</h2>
+  <table id="diskTbl"></table>
+  <h2 style="margin-top:14px">Download a model</h2>
+  <form id="dlForm" class="form">
+    <label>Backend<select name="backend"></select></label>
+    <label class="wide">Source (LM Studio: name like <code>qwen/qwen3-14b</code> or a Hugging Face URL; llamacpp: direct .gguf URL)<input name="source" required></label>
+    <div><button class="primary">Download</button></div>
+  </form>
+  <div id="jobs"></div>
+</dialog>
+
+<dialog id="logsDlg">
+  <div class="row" style="margin-top:0"><h3 style="margin:0">Engine logs</h3><span class="spacer"></span><button onclick="logsDlg.close()">Close</button></div>
+  <pre id="logsPre"></pre>
+</dialog>
+
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+let token = null;
+try { token = localStorage.getItem('homellm-token'); } catch {}
+let overview = null, currentNode = null, refreshing = false;
+
+async function api(method, path, body) {
+  const r = await fetch(path, { method, headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+    body: body === undefined ? undefined : JSON.stringify(body) });
+  if (r.status === 401 || r.status === 403) { showLogin('Token rejected'); throw new Error('auth'); }
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.detail || r.statusText);
+  return data;
+}
+
+function showLogin(msg) {
+  $('#appView').hidden = true; $('#login').hidden = false; $('#loginErr').textContent = msg || '';
+}
+$('#loginForm').onsubmit = async e => {
+  e.preventDefault(); token = $('#tokenInput').value.trim();
+  try { await api('GET', '/api/overview'); try { localStorage.setItem('homellm-token', token); } catch {} start(); }
+  catch (err) { if (err.message !== 'auth') $('#loginErr').textContent = err.message; }
+};
+$('#logoutBtn').onclick = () => { try { localStorage.removeItem('homellm-token'); } catch {} token = null; showLogin(); };
+
+function ago(ts) { if (!ts) return 'never'; const s = Math.round(Date.now()/1000 - ts); return s < 60 ? s + 's ago' : s < 3600 ? Math.round(s/60) + 'm ago' : Math.round(s/3600) + 'h ago'; }
+function meter(label, used, total, unit = 'GB') {
+  const pct = total ? Math.min(100, used / total * 100) : 0;
+  const cls = pct > 92 ? 'crit' : pct > 80 ? 'hot' : '';
+  return `<div class="meter"><div class="lbl"><span>${esc(label)}</span><span>${(used/1024).toFixed(1)} / ${(total/1024).toFixed(1)} ${unit}</span></div>
+    <div class="track"><div class="fill ${cls}" style="width:${pct.toFixed(1)}%"></div></div></div>`;
+}
+const stateClass = s => ({ ready: 'ok', loading: 'warn', error: 'bad', offline: 'bad' }[s] || '');
+
+function renderNodes() {
+  const el = $('#nodes');
+  if (!overview.nodes.length) { el.innerHTML = '<div class="card sub">No nodes yet. Install the node agent on a machine, then press “Scan LAN” or “Add node”.</div>'; return; }
+  el.innerHTML = overview.nodes.map(n => {
+    const st = n.status || {};
+    const state = n.online ? (st.state || '?') : 'offline';
+    const profiles = Object.keys(st.profiles || {});
+    const mem = st.memory || {};
+    const health = st.served?.health || {};
+    const warns = (health.warnings || []).map(w => `<div class="warn-text">⚠ ${esc(w)}</div>`).join('');
+    return `<div class="card" data-id="${esc(n.id)}">
+      <h3>${esc(n.name || n.id)} <span class="pill ${stateClass(state)}">${esc(state)}</span></h3>
+      <div class="sub">${esc(n.url)} · ${esc(n.source)} · ${n.online ? 'up ' + Math.round((st.uptime_s||0)/3600) + 'h' : 'last seen ' + ago(n.last_seen)}</div>
+      <div class="row" style="margin-top:8px"><span class="sub">Serving</span> <b>${esc(st.served?.model || '—')}</b>
+        ${st.served ? `<span class="sub">${esc(st.served.backend)} · ${esc(st.served.api_base)}</span>` : ''}</div>
+      ${(st.gpus || []).map(g => meter(`${g.name}${g.util_pct != null ? ' · ' + g.util_pct + '%' : ''}${g.temp_c != null ? ' · ' + g.temp_c + '°C' : ''}`, g.vram_used_mb, g.vram_total_mb)).join('')}
+      ${mem.total_mb ? meter('RAM' + (health.rss_mb ? ` · engine ${(health.rss_mb/1024).toFixed(1)} GB` : '') + (health.prompt_cache_disabled === false ? ' · prompt cache ON' : ''), mem.total_mb - mem.available_mb, mem.total_mb) : ''}
+      ${warns}
+      ${st.last_error ? `<div class="err-text">${esc(st.last_error)}</div>` : ''}
+      ${!n.online && n.error ? `<div class="err-text">${esc(n.error)}</div>` : ''}
+      <div class="row">
+        <select class="profileSel" ${n.online ? '' : 'disabled'}>${profiles.map(p => `<option ${p === st.active ? 'selected' : ''}>${esc(p)}</option>`).join('')}</select>
+        <button class="primary switchBtn" ${n.online && profiles.length ? '' : 'disabled'}>Switch</button>
+        <button class="stopBtn danger" ${n.online && st.active ? '' : 'disabled'}>Stop</button>
+        <button class="modelsBtn" ${n.online ? '' : 'disabled'}>Models</button>
+        <button class="logsBtn" ${n.online ? '' : 'disabled'}>Logs</button>
+        ${n.online ? '' : '<button class="forgetBtn danger">Forget</button>'}
+      </div>
+    </div>`;
+  }).join('');
+  el.querySelectorAll('.card[data-id]').forEach(card => {
+    const id = card.dataset.id;
+    card.querySelector('.switchBtn').onclick = () => act(() => api('POST', `/api/nodes/${id}/activate`, { profile: card.querySelector('.profileSel').value }));
+    card.querySelector('.stopBtn').onclick = () => confirm('Unload the model on this node?') && act(() => api('POST', `/api/nodes/${id}/activate`, { profile: null }));
+    card.querySelector('.modelsBtn').onclick = () => openModels(id);
+    card.querySelector('.logsBtn').onclick = () => openLogs(id);
+    const f = card.querySelector('.forgetBtn'); if (f) f.onclick = () => act(() => api('DELETE', `/api/nodes/${id}`));
+  });
+}
+
+function render() {
+  const lt = overview.litellm, tn = overview.tunnel;
+  const lp = $('#litellmPill'); lp.className = 'pill ' + (lt.ok ? 'ok' : 'bad');
+  lp.textContent = 'LiteLLM ' + (lt.ok ? 'up' : 'down') + (lt.last_sync && lt.last_sync.ok === false ? ' · sync failing' : '');
+  const tp = $('#tunnelPill'); tp.className = 'pill ' + (tn.active ? 'ok' : 'warn');
+  tp.innerHTML = 'tunnel ' + esc(tn.state) + (tn.public_url ? ` · <a href="${esc(tn.public_url)}" target="_blank" rel="noopener">${esc(tn.public_url.replace(/^https?:\/\//, ''))}</a>` : '');
+  $('#scanInfo').textContent = `scan ${overview.subnets.join(', ')} · ${ago(overview.last_scan)}`;
+  $('#litellmLink').href = `${location.protocol}//${location.hostname}:4000/ui`;
+  renderNodes();
+  const served = [...new Set(overview.nodes.filter(n => n.online && n.status?.served).map(n => n.status.served.model))];
+  const sel = $('#testModel'), cur = sel.value;
+  sel.innerHTML = served.map(m => `<option ${m === cur ? 'selected' : ''}>${esc(m)}</option>`).join('') || '<option value="">no models served</option>';
+  $('#events').innerHTML = overview.events.slice().reverse().map(e =>
+    `<div class="${e.level === 'alert' ? 'alert' : ''}">${new Date(e.ts*1000).toLocaleTimeString()}  ${esc(e.msg)}</div>`).join('');
+}
+
+async function refresh() {
+  if (refreshing || !token) return; refreshing = true;
+  try { overview = await api('GET', '/api/overview'); render(); } catch (e) { if (e.message !== 'auth') console.warn(e); }
+  finally { refreshing = false; }
+}
+async function act(fn) { try { await fn(); } catch (e) { if (e.message !== 'auth') alert(e.message); } setTimeout(refresh, 400); }
+
+$('#scanBtn').onclick = async () => { $('#scanBtn').disabled = true; $('#scanBtn').textContent = 'Scanning…';
+  try { const r = await api('POST', '/api/scan'); $('#scanBtn').textContent = `Found ${r.found}`; } catch (e) { alert(e.message); }
+  setTimeout(() => { $('#scanBtn').disabled = false; $('#scanBtn').textContent = 'Scan LAN'; }, 2500); refresh(); };
+$('#addNodeBtn').onclick = () => { const url = prompt('Node address (e.g. 192.168.1.50 or http://host:8765)'); if (url) act(() => api('POST', '/api/nodes', { url })); };
+
+async function openModels(id) {
+  currentNode = overview.nodes.find(n => n.id === id);
+  $('#modelsTitle').textContent = 'Models · ' + (currentNode.name || id);
+  const backends = Object.entries(currentNode.status?.backends || {}).filter(([, b]) => b.available).map(([n]) => n);
+  document.querySelectorAll('#profileForm select[name=backend], #dlForm select[name=backend]').forEach(s => s.innerHTML = backends.map(b => `<option>${esc(b)}</option>`).join(''));
+  $('#profilesTbl').innerHTML = '<tr><td class="sub">loading…</td></tr>'; $('#diskTbl').innerHTML = '';
+  modelsDlg.showModal();
+  await loadModels();
+}
+async function loadModels() {
+  const id = currentNode.id;
+  let data; try { data = await api('GET', `/api/nodes/${id}/models`); } catch (e) { $('#profilesTbl').innerHTML = `<tr><td class="err-text">${esc(e.message)}</td></tr>`; return; }
+  const active = currentNode.status?.active;
+  $('#profilesTbl').innerHTML = '<tr><th>Name</th><th>Backend</th><th>Model</th><th>Context</th><th>Parallel</th><th></th></tr>' +
+    Object.entries(data.profiles).map(([name, p]) => `<tr><td><b>${esc(name)}</b>${name === active ? ' <span class="pill ok">active</span>' : ''}</td><td>${esc(p.backend)}</td><td>${esc(p.model)}</td><td>${esc(p.context || '')}</td><td>${esc(p.parallel || '')}</td>
+      <td><button data-p="${esc(name)}" class="useP">Load</button> <button data-p="${esc(name)}" class="delP danger">Delete</button></td></tr>`).join('');
+  $('#profilesTbl').querySelectorAll('.useP').forEach(b => b.onclick = () => act(async () => { await api('POST', `/api/nodes/${id}/activate`, { profile: b.dataset.p }); modelsDlg.close(); }));
+  $('#profilesTbl').querySelectorAll('.delP').forEach(b => b.onclick = () => confirm('Delete profile ' + b.dataset.p + '?') && act(async () => { await api('DELETE', `/api/nodes/${id}/profiles/${encodeURIComponent(b.dataset.p)}`); loadModels(); }));
+  $('#diskTbl').innerHTML = '<tr><th>Backend</th><th>Model</th><th>Size</th><th>Max ctx</th><th></th></tr>' +
+    data.models.map((m, i) => `<tr><td>${esc(m.backend)}</td><td>${esc(m.model)}</td><td>${esc(m.size_gb)} GB</td><td>${esc(m.max_context || '')}</td><td><button data-i="${i}" class="mkP">Make profile</button></td></tr>`).join('');
+  $('#modelList').innerHTML = data.models.map(m => `<option value="${esc(m.model)}">`).join('');
+  $('#diskTbl').querySelectorAll('.mkP').forEach(b => b.onclick = () => {
+    const m = data.models[+b.dataset.i], f = $('#profileForm');
+    f.backend.value = m.backend; f.model.value = m.model;
+    f.name.value = m.model.split('/').pop().replace(/\.gguf$/i, '').toLowerCase().replace(/[^a-z0-9.-]+/g, '-').slice(0, 40);
+    f.context.value = Math.min(m.max_context || 32768, 32768); f.name.focus();
+  });
+  const jobs = currentNode.status?.jobs || {};
+  $('#jobs').innerHTML = Object.entries(jobs).map(([j, v]) => `<pre>${esc(j)} · ${esc(v.source)} · ${esc(v.state)}\n${esc(v.output)}</pre>`).join('');
+}
+$('#profileForm').onsubmit = e => { e.preventDefault(); const f = e.target;
+  const body = { name: f.name.value.trim(), backend: f.backend.value, model: f.model.value.trim(),
+    context: f.context.value ? +f.context.value : null, parallel: f.parallel.value ? +f.parallel.value : null,
+    args: f.args.value.trim() ? f.args.value.trim().split(/\s+/) : [] };
+  act(async () => { await api('POST', `/api/nodes/${currentNode.id}/profiles`, body); f.reset(); loadModels(); }); };
+$('#dlForm').onsubmit = e => { e.preventDefault(); const f = e.target;
+  act(async () => { await api('POST', `/api/nodes/${currentNode.id}/download`, { backend: f.backend.value, source: f.source.value.trim() }); f.reset();
+    $('#jobs').innerHTML = '<pre>download started — reopen this dialog to see progress</pre>'; }); };
+
+async function openLogs(id) {
+  $('#logsPre').textContent = 'loading…'; logsDlg.showModal();
+  try { const l = await api('GET', `/api/nodes/${id}/logs`); $('#logsPre').textContent = Object.entries(l).map(([k, v]) => `== ${k} ==\n${v || '(empty)'}`).join('\n\n') || 'no engine logs (LM Studio keeps its own in ~/.lmstudio/server-logs)'; }
+  catch (e) { $('#logsPre').textContent = e.message; }
+}
+
+$('#testBtn').onclick = async () => {
+  const model = $('#testModel').value; if (!model) return;
+  $('#testBtn').disabled = true; $('#testOut').innerHTML = '<span class="sub">running…</span>';
+  try {
+    const r = await api('POST', '/api/test', { model, prompt: $('#testPrompt').value });
+    $('#testOut').innerHTML = `<div><div class="stat">${r.tokens_per_second ?? '—'} tok/s</div><div class="sub">TTFT ${r.ttft_s ?? '—'}s · ${r.completion_tokens} tokens · ${r.total_s}s total</div></div>
+      <div class="sub" style="flex:1;min-width:240px;white-space:pre-wrap">${esc(r.answer || '(answer empty — tokens went to thinking)')}</div>`;
+  } catch (e) { $('#testOut').innerHTML = `<span class="err-text">${esc(e.message)}</span>`; }
+  $('#testBtn').disabled = false;
+};
+
+function start() { $('#login').hidden = true; $('#appView').hidden = false; refresh(); }
+setInterval(() => { if (!document.hidden && !modelsDlg.open) refresh(); }, 5000);
+token ? start() : showLogin();
+</script>
+</body>
+</html>

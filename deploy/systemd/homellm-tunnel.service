@@ -1,0 +1,11 @@
+[Unit]
+Description=homellm Cloudflare tunnel
+After=network-online.target
+
+[Service]
+ExecStart=CLOUDFLARED tunnel --no-autoupdate --config %h/.config/homellm/cloudflared.yml run
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target
