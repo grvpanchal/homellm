@@ -125,10 +125,10 @@ def test_cpu_panic_and_moving_average(rig):
 
 
 def test_check_refuses_incomplete_config_and_missing_headers(rig):
-    stub = FAN / "hosts" / "ai2-pc.conf"
-    r = subprocess.run(["bash", str(FAN / "fanctl.sh"), "--check", str(stub)], env=rig.env, capture_output=True,
+    rig.conf.write_text(UI_PC.replace('GPU_HEADERS="3 6"', 'GPU_HEADERS=""'))
+    r = subprocess.run(["bash", str(FAN / "fanctl.sh"), "--check", str(rig.conf)], env=rig.env, capture_output=True,
                        text=True)
-    assert r.returncode != 0 and "CHIP" in r.stderr
+    assert r.returncode != 0 and "GPU_HEADERS is empty" in r.stderr
     rig.conf.write_text(UI_PC.replace('FIXED="5:153"', 'FIXED="7:153"'))
     r = subprocess.run(["bash", str(FAN / "fanctl.sh"), "--check", str(rig.conf)], env=rig.env, capture_output=True,
                        text=True)
