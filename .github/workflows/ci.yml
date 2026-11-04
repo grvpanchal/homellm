@@ -16,4 +16,5 @@ jobs:
       - run: uv venv --python ${{ matrix.python }} && uv pip install -e '.[dev]'
       - run: .venv/bin/ruff check homellm tests
       - run: .venv/bin/pytest -q
-      - run: bash -n scripts/*.sh
+      - run: for f in scripts/*.sh fan-control/*.sh; do bash -n "$f"; done
+      - run: shellcheck fan-control/*.sh fan-control/hosts/*.conf scripts/*.sh

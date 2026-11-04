@@ -1,0 +1,12 @@
+[Unit]
+Description=GPU-aware fan control (fanctl, /etc/fanctl.conf)
+After=nvidia-persistenced.service systemd-modules-load.service
+
+[Service]
+ExecStartPre=/sbin/modprobe @MODULE@
+ExecStart=/usr/local/bin/fanctl /etc/fanctl.conf
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
