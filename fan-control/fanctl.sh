@@ -52,8 +52,9 @@ CONTROLLED=("${GH[@]}" "${CPH[@]}" "${MH[@]}")
 # hwmonN changes between boots, so find chips by their name file
 H=""; K=""
 for h in "$HWMON_ROOT"/hwmon*; do
+  # shellcheck disable=SC2254  # CHIP may be a glob, e.g. it8689*
   case $(cat "$h/name" 2>/dev/null) in
-    "$CHIP") H=$h ;;
+    $CHIP) H=$h ;;
     "$CPU_CHIP") K=$h ;;
   esac
 done
