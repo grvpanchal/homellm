@@ -83,11 +83,39 @@ if [ -x "$LMS" ]; then
   "$LMS" server stop >/dev/null 2>&1 || true
   "$LMS" daemon down >/dev/null 2>&1 || true
 fi
-if pkill -i -x 'lm-studio|lm studio|lmstudio|llmster' 2>/dev/null; then echo "    quit LM Studio"; fi
+# by name, then by install path (the app, its node helper and its bundled llama-server); homellm's own llama-server
+# lives under ~/.local/share/homellm and is not matched
+LMS_PROCS='/LM-Studio/|/\.lmstudio/\.internal/|/\.lmstudio/extensions/backends/|LM_Studio.*\.AppImage'
+quit=0
+pkill -i -x 'lm-studio|lm studio|lmstudio|llmster' 2>/dev/null && quit=1
+pkill -f "$LMS_PROCS" 2>/dev/null && quit=1
+if [ "$quit" = 1 ]; then
+  for _ in 1 2 3 4 5 6 7 8 9 10; do pgrep -f "$LMS_PROCS" >/dev/null || break; sleep 1; done
+  pkill -KILL -f "$LMS_PROCS" 2>/dev/null || true
+  echo "    quit LM Studio"
+fi
 for f in "$HOME"/.config/autostart/*[Ll][Mm]*[Ss]tudio*.desktop "$HOME"/.config/autostart/*lm-studio*.desktop; do
   [ -f "$f" ] || continue
   mv "$f" "$f.disabled-by-homellm" && echo "    disabled LM Studio autostart ($(basename "$f"))"
 done
+# LM Studio's "Run LLM server on login" (enableLocalService) relaunches it headless at every login; turn it off.
+# Done after quitting it, since LM Studio rewrites settings.json on exit.
+LMS_SETTINGS="$HOME/.lmstudio/settings.json"
+if [ -f "$LMS_SETTINGS" ]; then
+  sleep 2
+  "$SHARE/venv/bin/python" - "$LMS_SETTINGS" <<'PY'
+import json, shutil, sys
+path = sys.argv[1]
+with open(path) as f:
+    s = json.load(f)
+if s.get("enableLocalService"):
+    shutil.copy2(path, path + ".bak-homellm")
+    s["enableLocalService"] = False
+    with open(path, "w") as f:
+        json.dump(s, f, indent=2)
+    print("    turned off LM Studio's 'Run LLM server on login'")
+PY
+fi
 mkdir -p "$HOME/.lmstudio/models"
 
 echo "==> systemd user service"
