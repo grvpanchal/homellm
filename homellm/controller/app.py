@@ -24,7 +24,7 @@ from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from .. import CONTROLLER_PORT, __version__
+from .. import CONTROLLER_PORT, __version__, engine, hf
 from ..common import CONFIG_DIR, STATE_DIR, bearer_guard, load_yaml, save_yaml
 from . import discovery
 from .litellm_sync import LiteLLM
@@ -277,6 +277,44 @@ def create_app() -> FastAPI:
     @app.post("/api/nodes/{nid}/download", dependencies=[auth])
     async def download(nid: str, body: dict):
         return await ctl.node_call(nid, "POST", "/download", body)
+
+    @app.delete("/api/nodes/{nid}/jobs/{job}", dependencies=[auth])
+    async def cancel_job(nid: str, job: str):
+        return await ctl.node_call(nid, "DELETE", f"/jobs/{job}")
+
+    @app.post("/api/nodes/{nid}/engine", dependencies=[auth])
+    async def engine_install(nid: str, body: dict):
+        return await ctl.node_call(nid, "POST", "/engine/install", body)
+
+    cache: dict[str, tuple[float, Any]] = {}
+
+    async def cached(key: str, ttl: int, fn, *args):
+        hit = cache.get(key)
+        if hit and time.time() - hit[0] < ttl:
+            return hit[1]
+        try:
+            val = await asyncio.to_thread(fn, *args)
+        except (hf.HFError, engine.EngineError) as e:
+            raise HTTPException(400, str(e)) from e
+        except httpx.HTTPError as e:
+            raise HTTPException(502, f"lookup failed: {e}") from e
+        cache[key] = (time.time(), val)
+        return val
+
+    @app.get("/api/catalog", dependencies=[auth])
+    def catalog():
+        return {"models": hf.load_catalog()}
+
+    @app.get("/api/hf/files", dependencies=[auth])
+    async def hf_files(repo: str, revision: str = "main"):
+        """GGUF files in a Hugging Face repo, grouped into downloadable models (split parts together)."""
+        files = await cached(f"hf:{repo}@{revision}", 600, hf.list_repo, repo, revision)
+        groups = hf.group_ggufs(files)
+        return {"repo": repo, "groups": [{k: g[k] for k in ("name", "paths", "size_gb", "mmproj")} for g in groups]}
+
+    @app.get("/api/engine/latest", dependencies=[auth])
+    async def engine_latest(flavor: str = "cuda-12"):
+        return {"tag": await cached(f"engine:{flavor}", 3600, engine.latest_tag, flavor)}
 
     @app.get("/api/nodes/{nid}/logs", dependencies=[auth])
     async def logs(nid: str):

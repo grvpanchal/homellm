@@ -5,11 +5,9 @@ After=network-online.target
 [Service]
 ExecStart=%h/.local/share/homellm/venv/bin/homellm node
 EnvironmentFile=%h/.config/homellm/node.env
-Environment=LLAMA_ARG_CACHE_RAM=0
 Restart=always
 RestartSec=5
-# LM Studio, when the agent starts it, lands in this cgroup: don't kill it when the agent restarts
-KillMode=process
+# llama-server runs in its own transient unit (homellm-llamacpp), so restarting the agent leaves it serving
 
 [Install]
 WantedBy=default.target
