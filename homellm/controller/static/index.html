@@ -56,6 +56,7 @@
   .form label.wide { grid-column: 1 / -1; }
   pre { white-space: pre-wrap; font-size: 12px; background: var(--bg); padding: 10px; border-radius: 8px; max-height: 50vh; overflow: auto; }
   #login { max-width: 380px; margin: 12vh auto; }
+  .tag { font-size: 11px; padding: 0 6px; border-radius: 4px; background: var(--bar); color: var(--muted); margin-right: 3px; }
   .stat { font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; }
   @media (max-width: 480px) { .grid { grid-template-columns: 1fr; } main, header { padding-left: 16px; padding-right: 16px; } }
 </style>
@@ -108,9 +109,8 @@
   <h2 style="margin-top:14px">New profile</h2>
   <form id="profileForm" class="form">
     <label>Name<input name="name" required placeholder="qwen3-14b"></label>
-    <label>Backend<select name="backend"></select></label>
-    <label class="wide">Model (LM Studio key or GGUF file)<input name="model" required list="modelList"></label>
-    <label>Context<input name="context" type="number" placeholder="32768"></label>
+    <label class="wide">GGUF file (relative to the models folder, or an absolute path)<input name="model" required list="modelList"></label>
+    <label>Context<input name="context" type="number" placeholder="65536"></label>
     <label>Parallel<input name="parallel" type="number" placeholder="1"></label>
     <label class="wide">Extra llama-server args (llamacpp only, space-separated)<input name="args" placeholder="--cache-type-k q8_0 --cache-type-v q8_0 --flash-attn on"></label>
     <div><button class="primary">Save profile</button></div>
@@ -118,13 +118,18 @@
   <datalist id="modelList"></datalist>
   <h2 style="margin-top:14px">Models on disk</h2>
   <table id="diskTbl"></table>
-  <h2 style="margin-top:14px">Download a model</h2>
-  <form id="dlForm" class="form">
-    <label>Backend<select name="backend"></select></label>
-    <label class="wide">Source (LM Studio: name like <code>qwen/qwen3-14b</code> or a Hugging Face URL; llamacpp: direct .gguf URL)<input name="source" required></label>
-    <div><button class="primary">Download</button></div>
+  <h2 style="margin-top:14px">Downloads</h2>
+  <div id="jobs" class="sub">none running</div>
+  <h2 style="margin-top:14px">Model catalog (Hugging Face)</h2>
+  <p class="sub" style="margin:0">Downloads to this node's models folder and creates a ready-to-load profile. Add entries in <code>~/.config/homellm/catalog.yaml</code>.</p>
+  <table id="catalogTbl"></table>
+  <h2 style="margin-top:14px">Any Hugging Face repo</h2>
+  <form id="repoForm" class="row">
+    <input name="repo" required style="flex:1;min-width:240px" placeholder="owner/Model-GGUF  or  https://huggingface.co/…/file.gguf">
+    <label class="sub"><input type="checkbox" name="mmproj"> vision projector</label>
+    <button class="primary">List files</button>
   </form>
-  <div id="jobs"></div>
+  <table id="repoTbl"></table>
 </dialog>
 
 <dialog id="logsDlg">
@@ -184,6 +189,7 @@ function renderNodes() {
         ${st.served ? `<span class="sub">${esc(st.served.backend)} · ${esc(st.served.api_base)}</span>` : ''}</div>
       ${(st.gpus || []).map(g => meter(`${g.name}${g.util_pct != null ? ' · ' + g.util_pct + '%' : ''}${g.temp_c != null ? ' · ' + g.temp_c + '°C' : ''}`, g.vram_used_mb, g.vram_total_mb)).join('')}
       ${mem.total_mb ? meter('RAM' + (health.rss_mb ? ` · engine ${(health.rss_mb/1024).toFixed(1)} GB` : '') + (health.prompt_cache_disabled === false ? ' · prompt cache ON' : ''), mem.total_mb - mem.available_mb, mem.total_mb) : ''}
+      ${engineLine(st)}
       ${warns}
       ${st.last_error ? `<div class="err-text">${esc(st.last_error)}</div>` : ''}
       ${!n.online && n.error ? `<div class="err-text">${esc(n.error)}</div>` : ''}
@@ -193,6 +199,7 @@ function renderNodes() {
         <button class="stopBtn danger" ${n.online && st.active ? '' : 'disabled'}>Stop</button>
         <button class="modelsBtn" ${n.online ? '' : 'disabled'}>Models</button>
         <button class="logsBtn" ${n.online ? '' : 'disabled'}>Logs</button>
+        <button class="engineBtn" ${n.online ? '' : 'disabled'} title="Install the newest llama.cpp release on this node">Update engine</button>
         ${n.online ? '' : '<button class="forgetBtn danger">Forget</button>'}
       </div>
     </div>`;
@@ -203,9 +210,24 @@ function renderNodes() {
     card.querySelector('.stopBtn').onclick = () => confirm('Unload the model on this node?') && act(() => api('POST', `/api/nodes/${id}/activate`, { profile: null }));
     card.querySelector('.modelsBtn').onclick = () => openModels(id);
     card.querySelector('.logsBtn').onclick = () => openLogs(id);
+    card.querySelector('.engineBtn').onclick = () => confirm('Download the newest llama.cpp build on this node? The loaded model restarts on it when done.') &&
+      act(() => api('POST', `/api/nodes/${id}/engine`, {}));
     const f = card.querySelector('.forgetBtn'); if (f) f.onclick = () => act(() => api('DELETE', `/api/nodes/${id}`));
   });
 }
+
+let latestEngine = null;
+function engineLine(st) {
+  const lc = st.backends?.llamacpp; if (!lc) return '';
+  const e = lc.engine || {};
+  const job = Object.values(st.jobs || {}).find(j => j.kind === 'engine' && j.state === 'running');
+  if (job) return `<div class="sub" style="margin-top:6px">engine: updating · ${esc((job.output || '').split('\n').pop())}</div>`;
+  if (!lc.available) return `<div class="err-text">engine: ${esc(lc.reason || 'not available')}</div>`;
+  const ver = e.managed ? `llama.cpp ${esc(e.tag)} · ${esc(e.flavor)}` : `custom ${esc(e.server_bin)}`;
+  const behind = e.managed && latestEngine && e.tag && e.tag !== latestEngine ? ` · <span style="color:var(--warn)">${esc(latestEngine)} available</span>` : '';
+  return `<div class="sub" style="margin-top:6px">engine: ${ver}${behind}</div>`;
+}
+async function checkLatestEngine() { try { latestEngine = (await api('GET', '/api/engine/latest')).tag; } catch {} }
 
 function render() {
   const lt = overview.litellm, tn = overview.tunnel;
@@ -238,11 +260,9 @@ $('#addNodeBtn').onclick = () => { const url = prompt('Node address (e.g. 192.16
 async function openModels(id) {
   currentNode = overview.nodes.find(n => n.id === id);
   $('#modelsTitle').textContent = 'Models · ' + (currentNode.name || id);
-  const backends = Object.entries(currentNode.status?.backends || {}).filter(([, b]) => b.available).map(([n]) => n);
-  document.querySelectorAll('#profileForm select[name=backend], #dlForm select[name=backend]').forEach(s => s.innerHTML = backends.map(b => `<option>${esc(b)}</option>`).join(''));
-  $('#profilesTbl').innerHTML = '<tr><td class="sub">loading…</td></tr>'; $('#diskTbl').innerHTML = '';
+  $('#profilesTbl').innerHTML = '<tr><td class="sub">loading…</td></tr>'; $('#diskTbl').innerHTML = ''; $('#repoTbl').innerHTML = '';
   modelsDlg.showModal();
-  await loadModels();
+  await Promise.all([loadModels(), loadCatalog()]);
 }
 async function loadModels() {
   const id = currentNode.id;
@@ -253,30 +273,79 @@ async function loadModels() {
       <td><button data-p="${esc(name)}" class="useP">Load</button> <button data-p="${esc(name)}" class="delP danger">Delete</button></td></tr>`).join('');
   $('#profilesTbl').querySelectorAll('.useP').forEach(b => b.onclick = () => act(async () => { await api('POST', `/api/nodes/${id}/activate`, { profile: b.dataset.p }); modelsDlg.close(); }));
   $('#profilesTbl').querySelectorAll('.delP').forEach(b => b.onclick = () => confirm('Delete profile ' + b.dataset.p + '?') && act(async () => { await api('DELETE', `/api/nodes/${id}/profiles/${encodeURIComponent(b.dataset.p)}`); loadModels(); }));
-  $('#diskTbl').innerHTML = '<tr><th>Backend</th><th>Model</th><th>Size</th><th>Max ctx</th><th></th></tr>' +
-    data.models.map((m, i) => `<tr><td>${esc(m.backend)}</td><td>${esc(m.model)}</td><td>${esc(m.size_gb)} GB</td><td>${esc(m.max_context || '')}</td><td><button data-i="${i}" class="mkP">Make profile</button></td></tr>`).join('');
+  $('#diskTbl').innerHTML = '<tr><th>Model</th><th>Size</th><th>Vision</th><th></th></tr>' +
+    data.models.map((m, i) => `<tr><td>${esc(m.model)}</td><td>${esc(m.size_gb)} GB</td><td>${m.mmproj?.length ? 'yes' : ''}</td><td><button data-i="${i}" class="mkP">Make profile</button></td></tr>`).join('');
   $('#modelList').innerHTML = data.models.map(m => `<option value="${esc(m.model)}">`).join('');
   $('#diskTbl').querySelectorAll('.mkP').forEach(b => b.onclick = () => {
     const m = data.models[+b.dataset.i], f = $('#profileForm');
-    f.backend.value = m.backend; f.model.value = m.model;
-    f.name.value = m.model.split('/').pop().replace(/\.gguf$/i, '').toLowerCase().replace(/[^a-z0-9.-]+/g, '-').slice(0, 40);
-    f.context.value = Math.min(m.max_context || 32768, 32768); f.name.focus();
+    f.model.value = m.model;
+    f.name.value = m.model.split('/').pop().replace(/\.gguf$/i, '').replace(/-00001-of-\d+$/, '').toLowerCase().replace(/[^a-z0-9.-]+/g, '-').slice(0, 40);
+    f.context.value = 65536;
+    f.args.value = (m.mmproj?.length ? `--mmproj ${m.mmproj[0]} ` : '') + '--flash-attn on --cache-type-k q8_0 --cache-type-v q8_0'; f.name.focus();
   });
-  const jobs = currentNode.status?.jobs || {};
-  $('#jobs').innerHTML = Object.entries(jobs).map(([j, v]) => `<pre>${esc(j)} · ${esc(v.source)} · ${esc(v.state)}\n${esc(v.output)}</pre>`).join('');
+  renderJobs(currentNode.status?.jobs || {});
 }
+function renderJobs(jobs) {
+  const list = Object.entries(jobs).reverse();
+  $('#jobs').innerHTML = list.length ? list.map(([j, v]) => {
+    const pct = v.total_bytes ? Math.min(100, (v.done_bytes || 0) / v.total_bytes * 100) : null;
+    return `<div class="card" style="padding:8px 10px;margin-top:6px"><div class="row" style="margin-top:0"><b>${esc(v.source)}</b>
+      <span class="pill ${v.state === 'done' ? 'ok' : v.state === 'running' ? 'warn' : 'bad'}">${esc(v.state)}</span><span class="spacer"></span>
+      <button data-j="${esc(j)}" class="cancelJ">${v.state === 'running' ? 'Cancel' : 'Clear'}</button></div>
+      ${pct != null && v.state === 'running' ? `<div class="meter"><div class="track"><div class="fill" style="width:${pct.toFixed(1)}%"></div></div></div>` : ''}
+      <div class="sub" style="white-space:pre-wrap">${esc(v.output)}</div></div>`; }).join('') : 'none running';
+  $('#jobs').querySelectorAll('.cancelJ').forEach(b => b.onclick = () => act(async () => { await api('DELETE', `/api/nodes/${currentNode.id}/jobs/${encodeURIComponent(b.dataset.j)}`); pollJobs(); }));
+}
+async function pollJobs() {
+  if (!modelsDlg.open || !currentNode) return;
+  try {
+    overview = await api('GET', '/api/overview');
+    currentNode = overview.nodes.find(n => n.id === currentNode.id) || currentNode;
+    const jobs = currentNode.status?.jobs || {};
+    const wasRunning = $('#jobs').dataset.running === '1', running = Object.values(jobs).some(j => j.state === 'running');
+    renderJobs(jobs); $('#jobs').dataset.running = running ? '1' : '';
+    if (wasRunning && !running) loadModels();  // a download finished: show its new profile
+  } catch {}
+}
+setInterval(pollJobs, 3000);
+
+let catalog = [];
+async function loadCatalog() {
+  try { catalog = (await api('GET', '/api/catalog')).models; } catch (e) { $('#catalogTbl').innerHTML = `<tr><td class="err-text">${esc(e.message)}</td></tr>`; return; }
+  const vram = Math.max(0, ...(currentNode.status?.gpus || []).map(g => g.vram_total_mb / 1024));
+  $('#catalogTbl').innerHTML = '<tr><th>Name</th><th>VRAM</th><th>Quant</th><th>Notes</th><th></th></tr>' + catalog.map((m, i) => {
+    const fits = !m.vram_gb || !vram || m.vram_gb <= vram + 0.5;
+    return `<tr><td><b>${esc(m.name)}</b><div class="sub">${esc(m.repo)}</div></td>
+      <td style="${fits ? '' : 'color:var(--bad)'}">${m.vram_gb ? '~' + esc(m.vram_gb) + ' GB' : ''}</td><td>${esc(m.quant || 'Q4_K_M')}</td>
+      <td>${(m.tags || []).map(t => `<span class="tag">${esc(t)}</span>`).join('')}<div class="sub">${esc(m.notes || '')}</div></td>
+      <td><button data-i="${i}" class="dlC ${fits ? 'primary' : ''}">Download</button></td></tr>`; }).join('');
+  $('#catalogTbl').querySelectorAll('.dlC').forEach(b => b.onclick = () => startDownload({ catalog: catalog[+b.dataset.i].name }));
+}
+function startDownload(body) {
+  act(async () => { await api('POST', `/api/nodes/${currentNode.id}/download`, body); $('#jobs').dataset.running = '1'; pollJobs(); });
+}
+$('#repoForm').onsubmit = async e => { e.preventDefault(); const f = e.target, v = f.repo.value.trim();
+  if (/^https?:\/\//.test(v)) { startDownload({ source: v }); return; }
+  $('#repoTbl').innerHTML = '<tr><td class="sub">looking up…</td></tr>';
+  try {
+    const r = await api('GET', `/api/hf/files?repo=${encodeURIComponent(v)}`);
+    const models = r.groups.filter(g => !g.mmproj), mm = r.groups.some(g => g.mmproj);
+    $('#repoTbl').innerHTML = '<tr><th>File</th><th>Size</th><th></th></tr>' + models.map((g, i) =>
+      `<tr><td>${esc(g.name)}${g.paths.length > 1 ? ` <span class="sub">(${g.paths.length} parts)</span>` : ''}</td><td>${esc(g.size_gb)} GB</td><td><button data-i="${i}" class="dlR">Download</button></td></tr>`).join('') +
+      (mm ? '' : '<tr><td class="sub" colspan="3">no vision projector in this repo</td></tr>');
+    $('#repoTbl').querySelectorAll('.dlR').forEach(b => b.onclick = () =>
+      startDownload({ repo: r.repo, files: [models[+b.dataset.i].paths[0]], mmproj: f.mmproj.checked && mm }));
+  } catch (err) { $('#repoTbl').innerHTML = `<tr><td class="err-text">${esc(err.message)}</td></tr>`; }
+};
 $('#profileForm').onsubmit = e => { e.preventDefault(); const f = e.target;
-  const body = { name: f.name.value.trim(), backend: f.backend.value, model: f.model.value.trim(),
+  const body = { name: f.name.value.trim(), backend: 'llamacpp', model: f.model.value.trim(),
     context: f.context.value ? +f.context.value : null, parallel: f.parallel.value ? +f.parallel.value : null,
     args: f.args.value.trim() ? f.args.value.trim().split(/\s+/) : [] };
   act(async () => { await api('POST', `/api/nodes/${currentNode.id}/profiles`, body); f.reset(); loadModels(); }); };
-$('#dlForm').onsubmit = e => { e.preventDefault(); const f = e.target;
-  act(async () => { await api('POST', `/api/nodes/${currentNode.id}/download`, { backend: f.backend.value, source: f.source.value.trim() }); f.reset();
-    $('#jobs').innerHTML = '<pre>download started — reopen this dialog to see progress</pre>'; }); };
 
 async function openLogs(id) {
   $('#logsPre').textContent = 'loading…'; logsDlg.showModal();
-  try { const l = await api('GET', `/api/nodes/${id}/logs`); $('#logsPre').textContent = Object.entries(l).map(([k, v]) => `== ${k} ==\n${v || '(empty)'}`).join('\n\n') || 'no engine logs (LM Studio keeps its own in ~/.lmstudio/server-logs)'; }
+  try { const l = await api('GET', `/api/nodes/${id}/logs`); $('#logsPre').textContent = Object.entries(l).map(([k, v]) => `== ${k} ==\n${v || '(empty)'}`).join('\n\n') || 'no engine logs'; }
   catch (e) { $('#logsPre').textContent = e.message; }
 }
 
@@ -291,7 +360,8 @@ $('#testBtn').onclick = async () => {
   $('#testBtn').disabled = false;
 };
 
-function start() { $('#login').hidden = true; $('#appView').hidden = false; refresh(); }
+function start() { $('#login').hidden = true; $('#appView').hidden = false; refresh(); checkLatestEngine(); }
+setInterval(checkLatestEngine, 3600 * 1000);
 setInterval(() => { if (!document.hidden && !modelsDlg.open) refresh(); }, 5000);
 token ? start() : showLogin();
 </script>

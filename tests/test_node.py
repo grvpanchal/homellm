@@ -12,9 +12,10 @@ def agent(tmp_path, monkeypatch):
     importlib.reload(homellm.common)
     mod = importlib.reload(homellm.node.agent)
     homellm.common.save_yaml(mod.CONFIG_PATH, {
+        "config_version": 2,
         "name": "test",
         "backends": {},
-        "profiles": {"gemma": {"backend": "lmstudio", "model": "google/gemma"}},
+        "profiles": {"gemma": {"backend": "llamacpp", "model": "gemma.gguf"}},
     })
     return mod
 
@@ -42,7 +43,7 @@ def test_missing_backend_is_an_error_not_a_crash(agent):
     node.set_active("gemma")
     node.tick()
     assert node.state == "error"
-    assert "not available" in node.last_error
+    assert "not enabled" in node.last_error
 
 
 def test_health_endpoint_needs_no_auth_but_status_does(agent):
@@ -56,7 +57,7 @@ def test_health_endpoint_needs_no_auth_but_status_does(agent):
 
 
 class FakeBackend:
-    name = "lmstudio"
+    name = "llamacpp"
 
     def __init__(self, loaded=None):
         self.loaded_id = loaded
@@ -72,7 +73,13 @@ class FakeBackend:
         return [self.loaded_id] if self.loaded_id else []
 
     def server_pid(self):
-        return None
+        return 4242 if self.loaded_id else None
+
+    def unavailable_reason(self):
+        return ""
+
+    def engine_info(self):
+        return {"managed": True, "tag": "b1"}
 
     def stop(self):
         self.stopped = True
@@ -82,14 +89,13 @@ class FakeBackend:
         return {"warnings": []}
 
     def port(self):
-        return 1234
+        return 1236
 
 
 def test_fresh_node_adopts_loaded_model_and_never_unloads(agent):
     node = agent.Node("tok")
     fake = FakeBackend(loaded="gemma")
-    node.backends = {"lmstudio": fake}
-    node._backend_busy = lambda b: bool(b.loaded())
+    node.backends = {"llamacpp": fake}
     node.tick()
     assert node.active == "gemma" and node.state == "ready" and not fake.stopped
 
@@ -97,8 +103,7 @@ def test_fresh_node_adopts_loaded_model_and_never_unloads(agent):
 def test_fresh_node_with_unknown_model_stays_idle(agent):
     node = agent.Node("tok")
     fake = FakeBackend(loaded="something-else")
-    node.backends = {"lmstudio": fake}
-    node._backend_busy = lambda b: bool(b.loaded())
+    node.backends = {"llamacpp": fake}
     node.tick()
     assert node.active is None and node.state == "idle" and not fake.stopped
 
@@ -106,8 +111,7 @@ def test_fresh_node_with_unknown_model_stays_idle(agent):
 def test_explicit_stop_unloads(agent):
     node = agent.Node("tok")
     fake = FakeBackend(loaded="gemma")
-    node.backends = {"lmstudio": fake}
-    node._backend_busy = lambda b: bool(b.loaded())
+    node.backends = {"llamacpp": fake}
     node.set_active(None)
     node.tick()
     assert fake.stopped and node.state == "stopped"

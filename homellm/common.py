@@ -17,6 +17,9 @@ from fastapi import Header, HTTPException
 
 CONFIG_DIR = Path(os.environ.get("HOMELLM_CONFIG_DIR", Path.home() / ".config" / "homellm"))
 STATE_DIR = Path(os.environ.get("HOMELLM_STATE_DIR", Path.home() / ".local" / "state" / "homellm"))
+# GGUFs live in LM Studio's folder (<publisher>/<repo>/<file>.gguf) so LM Studio and homellm share one copy
+MODELS_DIR = Path.home() / ".lmstudio" / "models"
+DEFAULT_CONTEXT = 65536
 
 
 def load_yaml(path: Path, default: dict | None = None) -> dict:
@@ -117,6 +120,23 @@ def gpu_stats() -> list[dict[str, Any]]:
         except (OSError, ValueError):
             pass
     return gpus
+
+
+def gpu_processes() -> list[dict[str, Any]]:
+    """Processes holding NVIDIA GPU memory: [{pid, name, used_mb}]."""
+    if not shutil.which("nvidia-smi"):
+        return []
+    try:
+        out = subprocess.run(["nvidia-smi", "--query-compute-apps=pid,process_name,used_memory",
+                              "--format=csv,noheader,nounits"], capture_output=True, text=True, timeout=10).stdout
+    except (subprocess.SubprocessError, OSError):
+        return []
+    procs = []
+    for line in out.strip().splitlines():
+        parts = [x.strip() for x in line.split(",")]
+        if len(parts) == 3 and parts[0].isdigit():
+            procs.append({"pid": int(parts[0]), "name": parts[1], "used_mb": _int(parts[2]) or 0})
+    return procs
 
 
 def _int(s: str) -> int | None:

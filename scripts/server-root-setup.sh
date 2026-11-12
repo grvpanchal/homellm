@@ -33,7 +33,7 @@ echo "==> Firewall (LAN $LAN_CIDR)"
 if command -v ufw >/dev/null && ufw status | grep -q "Status: active"; then
   ufw allow from "$LAN_CIDR" to any port 4000,8765,8780 proto tcp comment 'homellm' >/dev/null
   ufw allow from "$LAN_CIDR" to any port 5353 proto udp comment 'homellm mDNS' >/dev/null
-  ufw status | grep -E 'homellm|1234'
+  ufw status | grep homellm
 else
   echo "ufw not active, skipping"
 fi
