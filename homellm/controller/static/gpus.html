@@ -9,78 +9,73 @@
     color-scheme: light;
     --bg: #f5f6f8; --panel: #fff; --text: #1b1f24; --muted: #687280; --border: #dde1e6; --accent: #2563eb; --bar: #e7eaee;
     /* chart roles (dataviz reference palette) */
-    --surface: #fcfcfb; --ink-2: #52514e; --axis-text: #898781; --grid: #e1e0d9; --baseline: #c3c2b7;
+    --ink-2: #52514e; --axis-text: #898781; --grid: #e1e0d9; --baseline: #c3c2b7;
     --series-load: #2a78d6; --series-temp: #eb6834;
-    --good: #0ca30c; --warning: #fab219; --critical: #d03b3b; --good-text: #006300;
+    --good: #0ca30c; --warning: #fab219; --critical: #d03b3b;
   }
   @media (prefers-color-scheme: dark) {
     :root {
       color-scheme: dark;
       --bg: #0f1216; --panel: #181c22; --text: #e5e7ea; --muted: #98a1ac; --border: #2a3038; --accent: #60a5fa; --bar: #262c34;
-      --surface: #1a1a19; --ink-2: #c3c2b7; --axis-text: #898781; --grid: #2c2c2a; --baseline: #383835;
-      --series-load: #3987e5; --series-temp: #d95926; --good-text: #0ca30c;
+      --ink-2: #c3c2b7; --axis-text: #898781; --grid: #2c2c2a; --baseline: #383835;
+      --series-load: #3987e5; --series-temp: #d95926;
     }
   }
   * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
-  header { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 12px 20px; background: var(--panel);
+  body { margin: 0; background: var(--bg); color: var(--text); font: 13px/1.35 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 8px 16px; background: var(--panel);
     border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 3; }
-  header h1 { font-size: 17px; margin: 0 8px 0 0; }
-  header a { color: var(--accent); text-decoration: none; font-size: 13px; }
+  header h1 { font-size: 15px; margin: 0; }
+  header a { color: var(--accent); text-decoration: none; font-size: 12px; }
+  .summary { display: flex; flex-wrap: wrap; gap: 4px 16px; align-items: center; color: var(--muted); font-size: 12px; }
+  .summary b { color: var(--text); font-size: 14px; font-weight: 600; }
   .spacer { flex: 1; }
-  .pill { font-size: 12px; padding: 2px 10px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); white-space: nowrap; }
+  .pill { font-size: 11px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); white-space: nowrap; }
   .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
-  .seg button { border: 0; border-radius: 0; background: var(--panel); padding: 4px 10px; }
+  .seg button { border: 0; border-radius: 0; background: var(--panel); padding: 2px 9px; font-size: 12px; }
   .seg button[aria-pressed="true"] { background: var(--accent); color: #fff; }
-  button, input { font: inherit; color: var(--text); background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 4px 10px; cursor: pointer; }
-  main { padding: 18px 20px; max-width: 1400px; margin: 0 auto; display: grid; gap: 18px; }
-  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 8px; font-weight: 600; }
-  .tiles { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
-  .tile, .card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; min-width: 0; }
-  .tile .label { color: var(--muted); font-size: 13px; }
-  .tile .value { font-size: 34px; font-weight: 600; line-height: 1.15; margin-top: 2px; }
-  .tile .note { color: var(--muted); font-size: 12px; margin-top: 2px; }
-  .grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); }
-  .card-head { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; }
-  .card h3 { margin: 0; font-size: 15px; }
-  .sub { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
-  .now { display: flex; align-items: baseline; gap: 10px; margin-top: 10px; flex-wrap: wrap; }
-  .now .temp { font-size: 30px; font-weight: 600; }
-  .status { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 600; padding: 1px 8px 1px 6px;
-    border-radius: 999px; border: 1px solid var(--border); color: var(--text); }
-  .status svg { width: 12px; height: 12px; flex: none; }
-  .meters { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 8px; }
-  .meter { font-size: 12px; }
-  .meter .lbl { display: flex; justify-content: space-between; color: var(--muted); }
+  button { font: inherit; color: var(--text); background: var(--panel); border: 1px solid var(--border); border-radius: 6px; cursor: pointer; }
+  main { padding: 10px 16px; }
+  .grid { display: grid; gap: 8px; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  @media (max-width: 1000px) { .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; min-width: 0; }
+  .head { display: flex; justify-content: space-between; align-items: center; gap: 6px; }
+  .head h3 { margin: 0; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .head h3 .idx { color: var(--muted); font-weight: 500; }
+  .sub { color: var(--muted); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .status { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 600; padding: 0 7px 0 5px;
+    border-radius: 999px; border: 1px solid var(--border); color: var(--text); white-space: nowrap; flex: none; }
+  .status svg { width: 11px; height: 11px; flex: none; }
+  .nums { display: grid; grid-template-columns: auto 1fr 1fr; gap: 10px; align-items: end; margin-top: 4px; }
+  .temp { font-size: 22px; font-weight: 600; line-height: 1; }
+  .meter .lbl { display: flex; justify-content: space-between; color: var(--muted); font-size: 11px; }
   .meter .lbl b { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
-  .meter .track { height: 6px; background: var(--bar); border-radius: 3px; overflow: hidden; margin-top: 3px; }
-  .meter .fill { height: 100%; border-radius: 3px; background: var(--series-load); }
-  .chart { margin-top: 12px; position: relative; }
-  .chart .ctitle { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-2); }
-  .chart .key { width: 12px; height: 2px; border-radius: 1px; }
-  .chart svg { display: block; width: 100%; height: 96px; overflow: visible; touch-action: none; }
-  .chart svg text { font-size: 10px; fill: var(--axis-text); font-variant-numeric: tabular-nums; }
+  .meter .track { height: 4px; background: var(--bar); border-radius: 2px; overflow: hidden; margin-top: 2px; }
+  .meter .fill { height: 100%; border-radius: 2px; background: var(--series-load); }
+  .charts { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 6px; }
+  .chart { position: relative; min-width: 0; }
+  .chart .ctitle { display: flex; align-items: center; gap: 4px; font-size: 10px; color: var(--ink-2); }
+  .chart .key { width: 10px; height: 2px; border-radius: 1px; flex: none; }
+  .chart svg { display: block; width: 100%; height: var(--chart-h, 46px); overflow: visible; touch-action: none; }
+  .chart svg text { font-size: 9px; fill: var(--axis-text); font-variant-numeric: tabular-nums; }
   .tip { position: absolute; pointer-events: none; background: var(--panel); border: 1px solid var(--border); border-radius: 6px;
-    padding: 3px 8px; font-size: 12px; white-space: nowrap; box-shadow: 0 2px 8px rgba(0,0,0,.15); z-index: 2; }
+    padding: 2px 7px; font-size: 11px; white-space: nowrap; box-shadow: 0 2px 8px rgba(0,0,0,.15); z-index: 2; }
   .tip .t { color: var(--muted); }
   .offline { opacity: .55; }
-  .empty { color: var(--muted); font-size: 12px; padding: 30px 0; text-align: center; }
-  table { width: 100%; border-collapse: collapse; font-size: 13px; }
-  td, th { text-align: left; padding: 6px; border-bottom: 1px solid var(--border); }
+  .empty { color: var(--muted); padding: 30px 0; text-align: center; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  td, th { text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--border); white-space: nowrap; }
   th { color: var(--muted); font-weight: 500; }
   td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
-  .table-wrap { overflow-x: auto; }
-  @media (max-width: 480px) {
-    header, main { padding-left: 16px; padding-right: 16px; }
-    .grid { grid-template-columns: 1fr; }
-  }
+  .table-wrap { overflow-x: auto; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 4px 8px; }
+  caption { caption-side: bottom; text-align: left; padding-top: 6px; color: var(--muted); font-size: 11px; }
+  @media (max-width: 480px) { .grid { grid-template-columns: 1fr; } }
 </style>
 </head>
 <body>
-<div id="app">
 <header>
   <h1>GPUs</h1>
-  <a href="/">← Dashboard</a>
+  <div class="summary" id="summary"></div>
   <span class="spacer"></span>
   <div class="seg" role="group" aria-label="Time range">
     <button data-range="900">15 min</button><button data-range="3600">1 hour</button>
@@ -89,13 +84,12 @@
     <button data-view="cards">Charts</button><button data-view="table">Table</button>
   </div>
   <span id="updated" class="pill">loading…</span>
+  <a href="/">Dashboard →</a>
 </header>
 <main>
-  <section class="tiles" id="tiles"></section>
   <section id="cardsView"><div class="grid" id="cards"></div></section>
-  <section id="tableView" hidden><div class="card table-wrap"><table id="table"></table></div></section>
+  <section id="tableView" hidden><div class="table-wrap"><table id="table"></table></div></section>
 </main>
-</div>
 
 <script>
 const WARM = 80, HOT = 90;          // °C: Tesla cards throttle in the low 90s
@@ -104,7 +98,8 @@ const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let range = 3600; try { range = +(localStorage.getItem('homellm-gpu-range') || 3600); } catch {}
 let view = 'cards'; try { view = localStorage.getItem('homellm-gpu-view') || 'cards'; } catch {}
-let data = null, timer = null;
+let data = null, timer = null, chartH = 46;
+const MIN_CHART_H = 46, MAX_CHART_H = 400;
 
 const ICONS = {
   good: '<svg viewBox="0 0 12 12"><circle cx="6" cy="6" r="6" fill="var(--good)"/><path d="M3.3 6.2l1.8 1.8 3.6-3.8" stroke="#fff" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>',
@@ -130,13 +125,10 @@ async function refresh() {
     data = await r.json();
     render();
     $('#updated').textContent = 'updated ' + fmtTime(data.now);
-    clearTimeout(timer); timer = setTimeout(refresh, (data.poll_interval || 10) * 1000);
-    return true;
   } catch (e) {
     $('#updated').textContent = 'update failed: ' + e.message;
-    clearTimeout(timer); timer = setTimeout(refresh, 10000);
-    return false;
   }
+  clearTimeout(timer); timer = setTimeout(refresh, ((data && data.poll_interval) || 10) * 1000);
 }
 
 // ---- controls ----------------------------------------------------------------------------------------------------
@@ -163,39 +155,48 @@ function render() {
   if (!data) return;
   syncControls();
   const gpus = sorted(data.gpus);
-  renderTiles(gpus);
-  if (view === 'cards') renderCards(gpus); else renderTable(gpus);
+  renderSummary(gpus);
+  if (view === 'cards') { renderCards(gpus); fitToScreen(gpus); } else renderTable(gpus);
 }
 
-function renderTiles(gpus) {
+// Grow the charts so the cards fill the window height: every GPU on screen, no scrolling, no wasted space.
+function fitToScreen(gpus) {
+  const grid = $('#cards'), first = grid.querySelector('.card');
+  if (!first || innerWidth <= 480) { setChartH(MIN_CHART_H, gpus); return; }
+  const cols = getComputedStyle(grid).gridTemplateColumns.split(' ').length;
+  const rows = Math.ceil(gpus.length / cols), gap = parseFloat(getComputedStyle(grid).rowGap) || 8;
+  const svg = first.querySelector('.chart svg');
+  const fixed = first.offsetHeight - (svg ? svg.getBoundingClientRect().height : chartH);  // card height minus chart
+  const avail = innerHeight - grid.getBoundingClientRect().top - 12;                     // 12 = bottom padding
+  const h = Math.floor((avail - gap * (rows - 1)) / rows - fixed);
+  setChartH(Math.max(MIN_CHART_H, Math.min(MAX_CHART_H, h)), gpus);
+}
+function setChartH(h, gpus) {
+  if (h === chartH) return;
+  chartH = h; document.documentElement.style.setProperty('--chart-h', h + 'px');
+  renderCards(gpus);  // redraw at the new height
+}
+
+function renderSummary(gpus) {
   const live = gpus.filter(g => g.online);
-  const withTemp = live.filter(g => g.temp_c != null);
-  const hottest = withTemp.reduce((a, g) => (!a || g.temp_c > a.temp_c ? g : a), null);
+  const hottest = live.filter(g => g.temp_c != null).reduce((a, g) => (!a || g.temp_c > a.temp_c ? g : a), null);
   const loads = live.filter(g => g.util_pct != null).map(g => g.util_pct);
   const avg = loads.length ? Math.round(loads.reduce((a, b) => a + b, 0) / loads.length) : null;
-  const busy = loads.filter(u => u >= 50).length;
-  const hs = hottest ? tempStatus(hottest.temp_c, true) : null;
-  $('#tiles').innerHTML = `
-    <div class="tile"><div class="label">Hottest GPU</div>
-      <div class="value">${hottest ? hottest.temp_c + ' °C' : '—'}</div>
-      <div class="note">${hottest ? `${statusChip(hs)} ${esc(hottest.node)} · GPU ${hottest.index}` : 'no readings'}</div></div>
-    <div class="tile"><div class="label">Average load</div>
-      <div class="value">${avg != null ? avg + '%' : '—'}</div>
-      <div class="note">${busy} of ${loads.length} GPUs above 50%</div></div>
-    <div class="tile"><div class="label">GPUs online</div>
-      <div class="value">${live.length}<span class="note" style="font-size:16px"> / ${gpus.length}</span></div>
-      <div class="note">across ${new Set(live.map(g => g.node_id)).size} nodes</div></div>`;
+  $('#summary').innerHTML = `
+    <span>Hottest <b>${hottest ? hottest.temp_c + ' °C' : '—'}</b>${hottest ? ` ${esc(hottest.node)} #${hottest.index}` : ''}</span>
+    <span>Avg load <b>${avg != null ? avg + '%' : '—'}</b></span>
+    <span>Online <b>${live.length}/${gpus.length}</b> GPUs</span>`;
 }
 
 function renderCards(gpus) {
   const root = $('#cards');
   if (!gpus.length) { root.innerHTML = '<div class="card empty">No GPUs reported yet. The controller polls nodes every 10 seconds.</div>'; return; }
-  // keep card elements across refreshes so hover state survives; rebuild only the inside
+  root.querySelector('.empty')?.remove();
   const seen = new Set();
   for (const g of gpus) {
     const k = gpuKey(g); seen.add(k);
     let card = root.querySelector(`[data-k="${CSS.escape(k)}"]`);
-    if (!card) { card = document.createElement('article'); card.className = 'card'; card.dataset.k = k; root.appendChild(card); }
+    if (!card) { card = document.createElement('article'); card.className = 'card'; card.dataset.k = k; }
     root.appendChild(card); // keeps sort order
     fillCard(card, g);
   }
@@ -205,45 +206,44 @@ function renderCards(gpus) {
 function fillCard(card, g) {
   const s = tempStatus(g.temp_c, g.online);
   const vramPct = g.vram_total_mb ? Math.round(100 * g.vram_used_mb / g.vram_total_mb) : 0;
+  const short = (g.name || '').replace(/^NVIDIA\s+/, '').replace(/-PCIE-\d+GB$/i, '');
   card.classList.toggle('offline', !g.online);
+  card.title = `${g.name} #${g.index}`;
   card.innerHTML = `
-    <div class="card-head">
-      <div><h3>${esc(g.name)} <span class="sub">#${g.index}</span></h3>
-        <div class="sub">${esc(g.node)} · ${esc(g.ip || '')}${g.model ? ' · ' + esc(g.model) : ''}</div></div>
-    </div>
-    <div class="now"><span class="temp">${g.temp_c != null ? g.temp_c + ' °C' : '—'}</span>${statusChip(s)}</div>
-    <div class="meters">
+    <div class="head"><h3>${esc(short)} <span class="idx">#${g.index}</span></h3>${statusChip(s)}</div>
+    <div class="sub">${esc(g.node)} · ${esc(g.ip || '')}${g.model ? ' · ' + esc(g.model) : ''}</div>
+    <div class="nums">
+      <span class="temp">${g.temp_c != null ? g.temp_c + '°' : '—'}</span>
       <div class="meter"><div class="lbl"><span>Load</span><b>${g.util_pct ?? '—'}%</b></div>
         <div class="track"><div class="fill" style="width:${g.util_pct || 0}%"></div></div></div>
-      <div class="meter"><div class="lbl"><span>VRAM</span><b>${gb(g.vram_used_mb)} / ${gb(g.vram_total_mb)} GB</b></div>
+      <div class="meter"><div class="lbl"><span>VRAM</span><b>${gb(g.vram_used_mb)}/${gb(g.vram_total_mb)}G</b></div>
         <div class="track"><div class="fill" style="width:${vramPct}%"></div></div></div>
     </div>
-    <div class="chart" data-metric="temp"><div class="ctitle"><span class="key" style="background:var(--series-temp)"></span>Temperature, °C</div></div>
-    <div class="chart" data-metric="load"><div class="ctitle"><span class="key" style="background:var(--series-load)"></span>Load, %</div></div>`;
+    <div class="charts">
+      <div class="chart" data-metric="temp"><div class="ctitle"><span class="key" style="background:var(--series-temp)"></span>Temp °C</div></div>
+      <div class="chart" data-metric="load"><div class="ctitle"><span class="key" style="background:var(--series-load)"></span>Load %</div></div>
+    </div>`;
   const h = g.history, cut = data.now - range;
-  const pts = (vals) => h.t.map((t, i) => [t, vals[i]]).filter(([t, v]) => t >= cut && v != null);
+  const pts = vals => h.t.map((t, i) => [t, vals[i]]).filter(([t, v]) => t >= cut && v != null);
   drawChart(card.querySelector('[data-metric="temp"]'), pts(h.temp_c), {
-    color: 'var(--series-temp)', domain: TEMP_DOMAIN, ticks: [20, 60, 100], unit: ' °C', threshold: WARM });
+    color: 'var(--series-temp)', domain: TEMP_DOMAIN, ticks: [20, 100], unit: ' °C', threshold: WARM });
   drawChart(card.querySelector('[data-metric="load"]'), pts(h.util_pct), {
-    color: 'var(--series-load)', domain: [0, 100], ticks: [0, 50, 100], unit: '%', area: true });
+    color: 'var(--series-load)', domain: [0, 100], ticks: [0, 100], unit: '%', area: true });
 }
 
-const SVGNS = 'http://www.w3.org/2000/svg';
 function drawChart(wrap, pts, o) {
-  const W = Math.max(wrap.clientWidth || 300, 200), H = 96, L = 30, R = 8, T = 6, B = 16;
+  const W = Math.max(wrap.clientWidth || 110, 80), H = chartH, L = 20, R = 4, T = 4, B = 4;
   const x0 = data.now - range, x1 = data.now;
   const X = t => L + (W - L - R) * (t - x0) / (x1 - x0);
   const Y = v => T + (H - T - B) * (1 - (Math.min(Math.max(v, o.domain[0]), o.domain[1]) - o.domain[0]) / (o.domain[1] - o.domain[0]));
   let svg = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(wrap.querySelector('.ctitle').textContent)}, last ${range / 60} minutes">`;
   for (const v of o.ticks) {
     svg += `<line x1="${L}" x2="${W - R}" y1="${Y(v)}" y2="${Y(v)}" stroke="${v === o.domain[0] ? 'var(--baseline)' : 'var(--grid)'}" stroke-width="1"/>`;
-    svg += `<text x="${L - 5}" y="${Y(v) + 3}" text-anchor="end">${v}</text>`;
+    svg += `<text x="${L - 3}" y="${Y(v) + 3}" text-anchor="end">${v}</text>`;
   }
   if (o.threshold != null) {
     svg += `<line x1="${L}" x2="${W - R}" y1="${Y(o.threshold)}" y2="${Y(o.threshold)}" stroke="var(--warning)" stroke-width="1"/>`;
-    svg += `<text x="${W - R}" y="${Y(o.threshold) - 3}" text-anchor="end">${o.threshold}° warm</text>`;
   }
-  svg += `<text x="${L}" y="${H - 2}">${range / 60} min ago</text><text x="${W - R}" y="${H - 2}" text-anchor="end">now</text>`;
   if (pts.length) {
     // break the line where samples are missing (node offline) instead of bridging the gap
     const gap = (data.poll_interval || 10) * 3;
@@ -260,12 +260,12 @@ function drawChart(wrap, pts, o) {
     if (area) svg += `<path d="${area}" fill="${o.color}" fill-opacity="0.1" stroke="none"/>`;
     svg += `<path d="${d}" fill="none" stroke="${o.color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
     const [lt, lv] = pts[pts.length - 1];
-    svg += `<circle cx="${X(lt)}" cy="${Y(lv)}" r="4" fill="${o.color}" stroke="var(--panel)" stroke-width="2"/>`;
+    svg += `<circle cx="${X(lt)}" cy="${Y(lv)}" r="3" fill="${o.color}" stroke="var(--panel)" stroke-width="1.5"/>`;
   } else {
-    svg += `<text x="${(L + W - R) / 2}" y="${H / 2}" text-anchor="middle">collecting data…</text>`;
+    svg += `<text x="${(L + W - R) / 2}" y="${H / 2 + 3}" text-anchor="middle">collecting…</text>`;
   }
   svg += `<g class="hover" visibility="hidden"><line y1="${T}" y2="${H - B}" stroke="var(--baseline)" stroke-width="1"/>
-    <circle r="4" fill="${o.color}" stroke="var(--panel)" stroke-width="2"/></g>
+    <circle r="3" fill="${o.color}" stroke="var(--panel)" stroke-width="1.5"/></g>
     <rect x="${L}" y="0" width="${W - L - R}" height="${H}" fill="transparent"/></svg>`;
   wrap.querySelectorAll('svg, .tip').forEach(n => n.remove());
   wrap.insertAdjacentHTML('beforeend', svg);
@@ -283,9 +283,9 @@ function drawChart(wrap, pts, o) {
     hover.querySelector('circle').setAttribute('cx', cx); hover.querySelector('circle').setAttribute('cy', cy);
     tip.innerHTML = `<b>${best[1]}${o.unit}</b> <span class="t">${fmtTime(best[0])}</span>`;
     tip.hidden = false;
-    const tw = tip.offsetWidth, left = cx * r.width / W;
-    tip.style.left = Math.min(Math.max(left - tw / 2, 0), r.width - tw) + 'px';
-    tip.style.top = (el.offsetTop + cy * r.height / H - 34) + 'px';
+    const tw = tip.offsetWidth, cw = wrap.clientWidth, left = cx * r.width / W;
+    tip.style.left = Math.min(Math.max(left - tw / 2, -40), cw - tw + 40) + 'px';
+    tip.style.top = (el.offsetTop - 22) + 'px';
   };
   el.addEventListener('pointermove', move);
   el.addEventListener('pointerdown', move);
@@ -305,8 +305,7 @@ function renderTable(gpus) {
         <td class="num">${g.temp_c ?? '—'}</td><td class="num">${stat(h.temp_c, h.t, max) ?? '—'}</td>
         <td class="num">${g.util_pct ?? '—'}</td><td class="num">${stat(h.util_pct, h.t, avg) ?? '—'}</td>
         <td class="num">${gb(g.vram_used_mb)} / ${gb(g.vram_total_mb)}</td><td>${esc(g.model || '')}</td></tr>`;
-    }).join('') + `</tbody><caption class="sub" style="caption-side:bottom;text-align:left;padding-top:8px">
-      Max and average cover the last ${range / 60} minutes. Warm ≥ ${WARM} °C, hot ≥ ${HOT} °C.</caption>`;
+    }).join('') + `</tbody><caption>Max and average cover the last ${range / 60} minutes. Warm ≥ ${WARM} °C (yellow line on the charts), hot ≥ ${HOT} °C.</caption>`;
 }
 
 let rt; new ResizeObserver(() => { clearTimeout(rt); rt = setTimeout(render, 150); }).observe(document.body);

@@ -36,6 +36,12 @@ NODES_PATH = STATE_DIR / "nodes.yaml"
 STATIC = Path(__file__).parent / "static"
 GPU_HISTORY_SECONDS = 3600  # how much per-GPU history /api/gpus keeps (in memory; lost on restart)
 MIN_GPU_VRAM_MB = 1024      # smaller "GPUs" are integrated graphics, not inference cards
+HIDDEN_GPU_VENDORS = {"amd"}  # AMD cards here only drive displays; models run on the NVIDIA cards
+
+
+def _inference_gpu(g: dict[str, Any]) -> bool:
+    """GPUs shown on the GPU page: not integrated graphics, not a display-only vendor."""
+    return (g.get("vram_total_mb") or 0) >= MIN_GPU_VRAM_MB and g.get("vendor") not in HIDDEN_GPU_VENDORS
 
 
 class Controller:
@@ -133,7 +139,7 @@ class Controller:
         now = time.time()
         maxlen = max(GPU_HISTORY_SECONDS // max(self.poll_interval, 1), 1) + 1
         for g in st.get("gpus") or []:
-            if (g.get("vram_total_mb") or 0) < MIN_GPU_VRAM_MB:
+            if not _inference_gpu(g):
                 continue
             q = self.gpu_history.setdefault((nid, int(g["index"])), collections.deque(maxlen=maxlen))
             q.append((round(now), g.get("temp_c"), g.get("util_pct"), g.get("vram_used_mb")))
@@ -144,7 +150,7 @@ class Controller:
         for rec in self.nodes.values():
             st = rec.get("status") or {}
             for g in st.get("gpus") or []:
-                if (g.get("vram_total_mb") or 0) < MIN_GPU_VRAM_MB:
+                if not _inference_gpu(g):
                     continue
                 hist = list(self.gpu_history.get((rec["id"], int(g["index"])), ()))
                 out.append({

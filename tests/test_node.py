@@ -117,7 +117,7 @@ def test_explicit_stop_unloads(agent):
     assert fake.stopped and node.state == "stopped"
 
 
-def test_controller_keeps_gpu_history_and_skips_integrated(tmp_path, monkeypatch):
+def test_controller_keeps_gpu_history_and_skips_display_gpus(tmp_path, monkeypatch):
     from homellm.controller import app as ctl_app
     monkeypatch.setattr(ctl_app, "CONFIG_PATH", tmp_path / "controller.yaml")
     monkeypatch.setattr(ctl_app, "NODES_PATH", tmp_path / "nodes.yaml")
@@ -125,7 +125,9 @@ def test_controller_keeps_gpu_history_and_skips_integrated(tmp_path, monkeypatch
     st = {"name": "n1", "ip": "10.0.0.5", "active": "m",
           "gpus": [{"index": 0, "name": "P4", "vram_used_mb": 4000, "vram_total_mb": 7680, "util_pct": 40, "temp_c": 61},
                    {"index": 1, "name": "AMD GPU", "vram_used_mb": 200, "vram_total_mb": 512, "util_pct": 0,
-                    "temp_c": None}]}
+                    "temp_c": None},
+                   {"index": 2, "vendor": "amd", "name": "AMD GPU", "vram_used_mb": 500, "vram_total_mb": 2048,
+                    "util_pct": 5, "temp_c": 38}]}
     ctl.nodes["n1"] = {"id": "n1", "name": "n1", "url": "http://10.0.0.5:8765", "online": True, "status": st}
     ctl.record_gpus("n1", st)
     ctl.record_gpus("n1", {**st, "gpus": [{**st["gpus"][0], "temp_c": 63}]})
