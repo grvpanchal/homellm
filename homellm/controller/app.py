@@ -34,6 +34,8 @@ log = logging.getLogger("homellm.controller")
 CONFIG_PATH = CONFIG_DIR / "controller.yaml"
 NODES_PATH = STATE_DIR / "nodes.yaml"
 STATIC = Path(__file__).parent / "static"
+GPU_HISTORY_SECONDS = 3600  # how much per-GPU history /api/gpus keeps (in memory; lost on restart)
+MIN_GPU_VRAM_MB = 1024      # smaller "GPUs" are integrated graphics, not inference cards
 
 
 class Controller:
@@ -55,6 +57,8 @@ class Controller:
         for rec in (load_yaml(NODES_PATH).get("nodes") or []):
             self.nodes[rec["id"]] = {**rec, "online": False, "status": None, "misses": 0}
         self.events: collections.deque = collections.deque(maxlen=300)
+        # (node id, gpu index) -> deque of (unix time, temp C, util %, vram used MB)
+        self.gpu_history: dict[tuple[str, int], collections.deque] = {}
         self.litellm_ok = False
         self.last_sync: dict[str, Any] = {}
         self.last_scan: float | None = None
@@ -117,12 +121,40 @@ class Controller:
                            f"{st['name']}: {prev} -> {st['state']}" + (f" ({st['last_error']})"
                                                                          if st.get("last_error") else ""))
             rec.update(status=st, online=True, misses=0, name=st["name"], last_seen=time.time(), error=None)
+            self.record_gpus(rec["id"], st)
         except Exception as e:
             rec["misses"] = rec.get("misses", 0) + 1
             rec["error"] = str(e) or type(e).__name__
             if rec["online"] and rec["misses"] >= 3:
                 rec["online"] = False
                 self.event("alert", f"node {rec.get('name')} offline: {rec['error']}")
+
+    def record_gpus(self, nid: str, st: dict[str, Any]) -> None:
+        now = time.time()
+        maxlen = max(GPU_HISTORY_SECONDS // max(self.poll_interval, 1), 1) + 1
+        for g in st.get("gpus") or []:
+            if (g.get("vram_total_mb") or 0) < MIN_GPU_VRAM_MB:
+                continue
+            q = self.gpu_history.setdefault((nid, int(g["index"])), collections.deque(maxlen=maxlen))
+            q.append((round(now), g.get("temp_c"), g.get("util_pct"), g.get("vram_used_mb")))
+
+    def gpus(self) -> list[dict[str, Any]]:
+        """Every inference GPU in the cluster: current reading plus its history."""
+        out = []
+        for rec in self.nodes.values():
+            st = rec.get("status") or {}
+            for g in st.get("gpus") or []:
+                if (g.get("vram_total_mb") or 0) < MIN_GPU_VRAM_MB:
+                    continue
+                hist = list(self.gpu_history.get((rec["id"], int(g["index"])), ()))
+                out.append({
+                    "node_id": rec["id"], "node": rec.get("name"), "online": rec.get("online", False),
+                    "ip": st.get("ip"), "model": st.get("active"),
+                    **g,
+                    "history": {"t": [h[0] for h in hist], "temp_c": [h[1] for h in hist],
+                                "util_pct": [h[2] for h in hist], "vram_used_mb": [h[3] for h in hist]},
+                })
+        return out
 
     async def poll_loop(self) -> None:
         while True:
@@ -208,6 +240,17 @@ def create_app() -> FastAPI:
     @app.get("/")
     def index():
         return FileResponse(STATIC / "index.html")
+
+    @app.get("/gpus")
+    def gpus_page():
+        return FileResponse(STATIC / "gpus.html")
+
+    # read-only and open on purpose (no admin token): GPU temperature/load for anyone on the LAN.
+    # The controller port is not exposed through the tunnel.
+    @app.get("/api/gpus")
+    def gpus():
+        return {"now": time.time(), "poll_interval": ctl.poll_interval, "history_seconds": GPU_HISTORY_SECONDS,
+                "gpus": ctl.gpus()}
 
     @app.get("/healthz")
     def healthz():

@@ -86,6 +86,16 @@ def memory_stats() -> dict[str, int]:
     }
 
 
+def _amd_temp(dev: Path) -> int | None:
+    """amdgpu reports the edge temperature through hwmon, in millidegrees."""
+    for f in sorted(dev.glob("hwmon/hwmon*/temp1_input")):
+        try:
+            return round(int(f.read_text()) / 1000)
+        except (OSError, ValueError):
+            continue
+    return None
+
+
 def gpu_stats() -> list[dict[str, Any]]:
     gpus: list[dict[str, Any]] = []
     if shutil.which("nvidia-smi"):
@@ -115,7 +125,7 @@ def gpu_stats() -> list[dict[str, Any]]:
                 "vram_used_mb": int(used.read_text()) // 2**20, "vram_total_mb": int(total.read_text()) // 2**20,
                 "util_pct": _int((dev / "gpu_busy_percent").read_text()) if (dev / "gpu_busy_percent").exists()
                 else None,
-                "temp_c": None,
+                "temp_c": _amd_temp(dev),
             })
         except (OSError, ValueError):
             pass

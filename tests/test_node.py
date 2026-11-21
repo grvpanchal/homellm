@@ -115,3 +115,34 @@ def test_explicit_stop_unloads(agent):
     node.set_active(None)
     node.tick()
     assert fake.stopped and node.state == "stopped"
+
+
+def test_controller_keeps_gpu_history_and_skips_integrated(tmp_path, monkeypatch):
+    from homellm.controller import app as ctl_app
+    monkeypatch.setattr(ctl_app, "CONFIG_PATH", tmp_path / "controller.yaml")
+    monkeypatch.setattr(ctl_app, "NODES_PATH", tmp_path / "nodes.yaml")
+    ctl = ctl_app.Controller("tok", "key")
+    st = {"name": "n1", "ip": "10.0.0.5", "active": "m",
+          "gpus": [{"index": 0, "name": "P4", "vram_used_mb": 4000, "vram_total_mb": 7680, "util_pct": 40, "temp_c": 61},
+                   {"index": 1, "name": "AMD GPU", "vram_used_mb": 200, "vram_total_mb": 512, "util_pct": 0,
+                    "temp_c": None}]}
+    ctl.nodes["n1"] = {"id": "n1", "name": "n1", "url": "http://10.0.0.5:8765", "online": True, "status": st}
+    ctl.record_gpus("n1", st)
+    ctl.record_gpus("n1", {**st, "gpus": [{**st["gpus"][0], "temp_c": 63}]})
+    gpus = ctl.gpus()
+    assert [g["name"] for g in gpus] == ["P4"]
+    assert gpus[0]["ip"] == "10.0.0.5" and gpus[0]["history"]["temp_c"] == [61, 63]
+
+
+def test_gpu_page_and_api_are_open_but_admin_api_is_not(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+    from homellm.controller import app as ctl_app
+    monkeypatch.setattr(ctl_app, "CONFIG_PATH", tmp_path / "controller.yaml")
+    monkeypatch.setattr(ctl_app, "NODES_PATH", tmp_path / "nodes.yaml")
+    for k in ("HOMELLM_CLUSTER_TOKEN", "LITELLM_MASTER_KEY", "HOMELLM_ADMIN_TOKEN"):
+        monkeypatch.setenv(k, "secret")
+    c = TestClient(ctl_app.create_app())  # not entering the context: skips polling and mDNS
+    assert c.get("/gpus").status_code == 200
+    r = c.get("/api/gpus")
+    assert r.status_code == 200 and r.json()["gpus"] == []
+    assert c.get("/api/overview").status_code == 401
