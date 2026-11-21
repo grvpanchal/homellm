@@ -1,9 +1,9 @@
 from homellm.controller.litellm_sync import deployment_id, desired_deployments, plan
 
 
-def node(nid, model, ip="192.168.1.10", online=True, port=1234):
+def node(nid, model, ip="192.168.1.10", online=True, port=1236):
     return {"online": online, "status": {"id": nid, "name": nid, "served": {
-        "model": model, "api_base": f"http://{ip}:{port}/v1", "backend": "lmstudio"}}}
+        "model": model, "api_base": f"http://{ip}:{port}/v1", "backend": "llamacpp"}}}
 
 
 def test_desired_skips_offline_and_idle():
@@ -14,7 +14,7 @@ def test_desired_skips_offline_and_idle():
     dep = d[deployment_id("a", "gemma")]
     assert dep["model_name"] == "gemma"
     assert dep["litellm_params"]["model"] == "openai/gemma"
-    assert dep["litellm_params"]["api_base"] == "http://192.168.1.10:1234/v1"
+    assert dep["litellm_params"]["api_base"] == "http://192.168.1.10:1236/v1"
 
 
 def test_plan_adds_new_and_removes_stale_only_ours():

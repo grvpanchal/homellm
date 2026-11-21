@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import collections
+import itertools
 import logging
 import socket
 import subprocess
@@ -17,17 +18,18 @@ import time
 from contextlib import asynccontextmanager
 from typing import Any
 
-import httpx
 from fastapi import Depends, FastAPI, HTTPException
 from pydantic import BaseModel
 from zeroconf import IPVersion, ServiceInfo
 from zeroconf.asyncio import AsyncZeroconf
 
-from .. import NODE_PORT, SERVICE_TYPE, __version__
+from .. import NODE_PORT, SERVICE_TYPE, __version__, engine, hf, initcfg
 from ..common import (
+    DEFAULT_CONTEXT,
     CONFIG_DIR,
     STATE_DIR,
     bearer_guard,
+    gpu_processes,
     gpu_stats,
     load_yaml,
     memory_stats,
@@ -36,7 +38,7 @@ from ..common import (
     primary_ip,
     save_yaml,
 )
-from .backends import Backend, BackendError, LMStudioBackend, build_backends
+from .backends import Backend, BackendError, build_backends
 
 log = logging.getLogger("homellm.node")
 
@@ -48,6 +50,10 @@ STATE_PATH = STATE_DIR / "node-state.yaml"
 class Node:
     def __init__(self, token: str):
         self.token = token
+        try:
+            migration = initcfg.migrate_node(CONFIG_PATH.parent, STATE_PATH.parent)
+        except Exception as e:  # a bad upgrade must not keep the agent from starting
+            migration = [f"config upgrade failed: {e}"]
         self.cfg = load_yaml(CONFIG_PATH)
         self.name = self.cfg.get("name") or socket.gethostname()
         self.id = node_id()
@@ -71,6 +77,10 @@ class Node:
         self.jobs: dict[str, dict[str, Any]] = {}
         self._last_oom_check = time.time()
         self._alerted: dict[str, float] = {}
+        self._job_ids = itertools.count(1)
+        self.engine_busy = threading.Lock()
+        for note in migration:
+            self.event("info", f"config upgrade: {note}")
 
     # ---- profiles -------------------------------------------------------------------------------------------
     def profiles(self) -> dict[str, dict[str, Any]]:
@@ -89,6 +99,15 @@ class Node:
             raise HTTPException(400, "only profiles created from the dashboard can be deleted; edit node.yaml")
         del extra[name]
         save_yaml(PROFILES_PATH, extra)
+
+    def new_job(self, kind: str, source: str) -> str:
+        job_id = f"{kind}-{int(time.time())}-{next(self._job_ids)}"
+        # keep the job list short: finished jobs older than the 10 newest go away
+        done = [j for j, v in self.jobs.items() if v["state"] != "running"]
+        for j in done[:-10]:
+            del self.jobs[j]
+        self.jobs[job_id] = {"kind": kind, "source": source, "state": "running", "output": "", "started": time.time()}
+        return job_id
 
     # ---- events / alerts ------------------------------------------------------------------------------------
     def event(self, level: str, msg: str) -> None:
@@ -147,8 +166,11 @@ class Node:
             self.state, self.last_error = "error", f"profile {active} no longer exists"
             return
         backend = self.backends.get(profile["backend"])
-        if not backend or not backend.available():
-            self.state, self.last_error = "error", f"backend {profile['backend']} not available on this node"
+        if not backend:
+            self.state, self.last_error = "error", f"backend {profile['backend']} not enabled on this node"
+            return
+        if not backend.available():
+            self.state, self.last_error = "error", backend.unavailable_reason()
             return
         # only one engine holds the GPU at a time
         for name, other in self.backends.items():
@@ -185,9 +207,14 @@ class Node:
         except (BackendError, subprocess.SubprocessError, OSError) as e:
             self.state, self.last_error = "error", str(e)
             self.event("alert", f"{active} failed to start: {e}")
+        if self.state == "error":
+            hogs = self.foreign_gpu_users()
+            if hogs:
+                self.last_error = f"{self.last_error}; GPU memory held by {hogs}"
+                self.event("alert", f"GPU memory held by {hogs}")
 
     def adopt_loaded(self) -> str | None:
-        """If a profile's model is already loaded (e.g. by hand in LM Studio), take it over instead of reloading."""
+        """If a profile's model is already being served (the agent restarted), adopt it instead of reloading."""
         for name, profile in self.profiles().items():
             backend = self.backends.get(profile.get("backend"))
             if backend and backend.available() and backend.is_ready(name, profile):
@@ -208,10 +235,20 @@ class Node:
             time.sleep(3)
         return False
 
+    def foreign_gpu_users(self) -> str:
+        """Other programs holding VRAM (a leftover LM Studio, a desktop app), which make loads fail."""
+        ours = {pid for b in self.backends.values() if (pid := b.server_pid())}
+        hogs = []
+        for p in gpu_processes():
+            if p["pid"] in ours or p["used_mb"] < 512:
+                continue
+            lmstudio = ".lmstudio" in p["name"] or "LM-Studio" in p["name"]
+            what = "LM Studio (quit it, or `lms unload --all`)" if lmstudio else p["name"].rsplit("/", 1)[-1]
+            hogs.append(f"{what} pid {p['pid']} {p['used_mb']} MB")
+        return ", ".join(hogs)
+
     @staticmethod
     def _backend_busy(b: Backend) -> bool:
-        if isinstance(b, LMStudioBackend):
-            return bool(b.loaded())
         return b.server_pid() is not None
 
     def check_engine(self, backend: Backend) -> None:
@@ -235,7 +272,7 @@ class Node:
         except (subprocess.SubprocessError, OSError):
             return
         for line in out.splitlines():
-            if "Killed process" in line and any(k in line for k in ("llama-server", "lm-studio", "llmworker")):
+            if "Killed process" in line and "llama-server" in line:
                 self.event("alert", f"OOM killer: {line.strip()}")
 
     # ---- status ---------------------------------------------------------------------------------------------
@@ -254,11 +291,14 @@ class Node:
             "uptime_s": int(time.time() - self.started),
             "active": active, "state": self.state, "last_error": self.last_error,
             "served": served,
-            "backends": {n: {"available": b.available(), "port": b.port()} for n, b in self.backends.items()},
+            "backends": {n: {"available": b.available(), "port": b.port(), "engine": b.engine_info(),
+                             **({} if b.available() else {"reason": b.unavailable_reason()})}
+                         for n, b in self.backends.items()},
+            "engine_flavor": engine.detect_flavor_cached(),
             "profiles": profiles,
             "memory": memory_stats(), "gpus": gpu_stats(),
             "events": list(self.events)[-30:],
-            "jobs": self.jobs,
+            "jobs": {k: {kk: vv for kk, vv in v.items() if kk != "cancel"} for k, v in list(self.jobs.items())},
         }
 
 
@@ -268,7 +308,7 @@ class ActivateBody(BaseModel):
 
 class ProfileBody(BaseModel):
     name: str
-    backend: str
+    backend: str = "llamacpp"
     model: str
     context: int | None = None
     parallel: int | None = None
@@ -276,9 +316,29 @@ class ProfileBody(BaseModel):
 
 
 class DownloadBody(BaseModel):
-    backend: str = "lmstudio"
-    source: str  # lmstudio: model name / HF URL; llamacpp: direct .gguf URL
+    """What to fetch. One of:
+    - catalog: a name from the model catalog (repo, quant and profile settings come from it)
+    - repo (+ quant or files): any Hugging Face GGUF repo
+    - source: a huggingface.co file URL, or any direct .gguf URL
+    """
+    catalog: str | None = None
+    repo: str | None = None
+    quant: str | None = None
+    files: list[str] | None = None
+    mmproj: bool | str | None = None
+    revision: str = "main"
+    source: str | None = None
     filename: str | None = None
+    make_profile: bool = True
+    profile_name: str | None = None
+    backend: str = "llamacpp"  # accepted for old clients; llamacpp is the only engine
+
+
+class EngineBody(BaseModel):
+    version: str | None = None  # e.g. b12170; newest when empty
+    flavor: str | None = None  # cuda-12 | cuda-13 | rocm | vulkan | cpu; detected when empty
+    force: bool = False
+    restart: bool = True  # reload the active model on the new version
 
 
 def create_app(token: str) -> FastAPI:
@@ -340,12 +400,43 @@ def create_app(token: str) -> FastAPI:
 
     @app.post("/download", dependencies=[auth])
     def download(body: DownloadBody):
-        backend = node.backends.get(body.backend)
-        if not backend or not backend.available():
-            raise HTTPException(400, f"backend {body.backend} not available")
-        job_id = f"dl-{int(time.time())}"
-        node.jobs[job_id] = {"source": body.source, "state": "running", "output": ""}
+        backend = node.backends.get("llamacpp")
+        if not backend:
+            raise HTTPException(400, "llamacpp backend not enabled on this node")
+        if not (body.catalog or body.repo or body.source):
+            raise HTTPException(400, "give catalog, repo or source")
+        if body.catalog and not hf.catalog_entry(body.catalog):
+            raise HTTPException(404, f"{body.catalog} is not in the catalog")
+        label = body.catalog or body.repo or body.source
+        job_id = node.new_job("download", label)
         threading.Thread(target=run_download, args=(node, backend, body, job_id), daemon=True).start()
+        return {"ok": True, "job": job_id}
+
+    @app.delete("/jobs/{job_id}", dependencies=[auth])
+    def cancel_job(job_id: str):
+        job = node.jobs.get(job_id)
+        if not job:
+            raise HTTPException(404, "no such job")
+        if job["state"] == "running":
+            job["cancel"] = True
+        else:
+            del node.jobs[job_id]
+        return {"ok": True}
+
+    @app.get("/catalog", dependencies=[auth])
+    def catalog():
+        return {"models": hf.load_catalog()}
+
+    @app.get("/engine", dependencies=[auth])
+    def engine_status():
+        return {"current": engine.current(), "installed": engine.installed(), "flavor": engine.detect_flavor()}
+
+    @app.post("/engine/install", dependencies=[auth])
+    def engine_install(body: EngineBody):
+        if node.engine_busy.locked():
+            raise HTTPException(409, "an engine install is already running")
+        job_id = node.new_job("engine", f"llama.cpp {body.version or 'latest'} {body.flavor or ''}".strip())
+        threading.Thread(target=run_engine_install, args=(node, body, job_id), daemon=True).start()
         return {"ok": True, "job": job_id}
 
     @app.get("/logs", dependencies=[auth])
@@ -359,38 +450,98 @@ def create_app(token: str) -> FastAPI:
     return app
 
 
+def _progress(job: dict[str, Any]):
+    last = [0.0]
+
+    def cb(done: int, total: int, name: str) -> None:
+        now = time.time()
+        if now - last[0] < 1 and done < total:
+            return
+        last[0] = now
+        job["done_bytes"], job["total_bytes"] = done, total
+        pct = f" ({done / total * 100:.0f}%)" if total else ""
+        size = f"{done / 1e9:.2f} / {total / 1e9:.2f} GB{pct}" if total else f"{done / 1e9:.2f} GB"
+        job["output"] = f"{name}: {size}"
+    return cb
+
+
 def run_download(node: Node, backend: Backend, body: DownloadBody, job_id: str) -> None:
     job = node.jobs[job_id]
+    models_dir: Any = backend.models_dir  # type: ignore[attr-defined]
+    stop = lambda: bool(job.get("cancel"))  # noqa: E731
     try:
-        if body.backend == "lmstudio":
-            proc = backend.download(body.source)  # type: ignore[attr-defined]
-            tail: collections.deque = collections.deque(maxlen=20)
-            for line in proc.stdout:  # type: ignore[union-attr]
-                tail.append(line.rstrip()[-200:])
-                job["output"] = "\n".join(tail)
-            proc.wait()
-            job["state"] = "done" if proc.returncode == 0 else "failed"
-        else:
-            name = body.filename or body.source.rstrip("/").split("/")[-1].split("?")[0]
-            if not name.endswith(".gguf"):
-                raise ValueError("llamacpp downloads need a direct .gguf URL")
-            dest = backend.models_dir / name  # type: ignore[attr-defined]
-            tmp = dest.with_suffix(".part")
-            with httpx.stream("GET", body.source, follow_redirects=True, timeout=60) as r:
-                r.raise_for_status()
-                total = int(r.headers.get("content-length", 0))
-                done = 0
-                with tmp.open("wb") as f:
-                    for chunk in r.iter_bytes(1 << 20):
-                        f.write(chunk)
-                        done += len(chunk)
-                        job["output"] = f"{done / 1e9:.2f} / {total / 1e9:.2f} GB" if total else f"{done / 1e9:.2f} GB"
-            tmp.rename(dest)
-            job["state"] = "done"
-        node.event("info", f"download {body.source}: {job['state']}")
+        entry = hf.catalog_entry(body.catalog) if body.catalog else None
+        repo, quant, files, revision = body.repo, body.quant, body.files, body.revision
+        mmproj = body.mmproj
+        if entry:
+            repo, quant = entry["repo"], quant or entry.get("quant")
+            mmproj = entry.get("mmproj", False) if mmproj is None else mmproj
+        elif body.source and (parsed := hf.parse_hf_url(body.source)):
+            repo, revision, path = parsed
+            files = [path]
+        if repo:
+            job["output"] = f"looking up {repo}"
+            plan = hf.plan(repo, quant, files, bool(mmproj) and mmproj, revision)
+            job["source"] = f"{repo} · {plan['model']['name']}"
+            job["total_bytes"] = plan["size"]
+            hf.fetch_plan(plan, models_dir, _progress(job), should_stop=stop)
+            if body.make_profile:
+                name, profile = hf.profile_for(plan, models_dir, entry)
+                name = body.profile_name or name
+                node.save_profile(name, profile)
+                job["profile"] = name
+                node.event("info", f"profile {name} created")
+        else:  # plain URL to a .gguf
+            src = body.source or ""
+            name = body.filename or src.rstrip("/").split("/")[-1].split("?")[0]
+            if not name.endswith(".gguf") or "/" in name:
+                raise ValueError("a direct download needs a URL ending in a .gguf file name")
+            dest = models_dir / "downloads" / name
+            hf.download_file(src, dest, progress=_progress(job), should_stop=stop)
+            if body.make_profile:
+                pname = body.profile_name or initcfg.slug(dest.stem)
+                node.save_profile(pname, {"backend": "llamacpp", "model": str(dest.relative_to(models_dir)),
+                                          "context": DEFAULT_CONTEXT, "parallel": 1, "args": list(hf.DEFAULT_ARGS),
+                                          "source": src})
+                job["profile"] = pname
+        job["state"] = "done"
+        job["output"] = (job.get("output", "") + "\ndone" + (f" · profile {job['profile']}" if job.get("profile")
+                                                              else "")).strip()
+        node.event("info", f"download {job['source']}: done")
     except Exception as e:
-        job["state"], job["output"] = "failed", str(e)
-        node.event("alert", f"download {body.source} failed: {e}")
+        job["state"], job["output"] = ("cancelled" if job.get("cancel") else "failed"), str(e)
+        node.event("alert", f"download {job['source']} {job['state']}: {e}")
+
+
+def run_engine_install(node: Node, body: EngineBody, job_id: str) -> None:
+    job = node.jobs[job_id]
+    lines: collections.deque = collections.deque(maxlen=8)
+
+    def log(msg: str) -> None:
+        lines.append(msg)
+        job["output"] = "\n".join(lines)
+
+    with node.engine_busy:
+        try:
+            before = (engine.current() or {}).get("dir")
+            cur = engine.install(body.flavor, body.version, body.force, _progress(job), log)
+            job["source"] = f"llama.cpp {cur.get('tag')} ({cur.get('flavor')})"
+            job["state"] = "done"
+            node.event("info", f"engine: {job['source']} installed")
+            # rebuild so a node that had no engine yet picks it up
+            node.backends = build_backends(node.cfg)
+            if body.restart and cur.get("dir") != before:
+                profile = node.profiles().get(node.active or "")
+                b = node.backends.get((profile or {}).get("backend", ""))
+                if profile and b and getattr(b, "managed", False) and b.server_pid():
+                    node.event("info", f"restarting {node.active} on the new llama-server")
+                    b.stop()
+                    with node.lock:
+                        node.restarts.clear()
+                    node.wake.set()
+        except Exception as e:
+            job["state"], job["output"] = "failed", f"{job.get('output', '')}\n{e}".strip()
+            node.event("alert", f"engine install failed: {e}")
 
 
 async def advertise(node: Node) -> AsyncZeroconf:

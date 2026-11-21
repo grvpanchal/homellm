@@ -24,7 +24,7 @@ from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from .. import CONTROLLER_PORT, __version__
+from .. import CONTROLLER_PORT, __version__, engine, hf
 from ..common import CONFIG_DIR, STATE_DIR, bearer_guard, load_yaml, save_yaml
 from . import discovery
 from .litellm_sync import LiteLLM
@@ -34,6 +34,14 @@ log = logging.getLogger("homellm.controller")
 CONFIG_PATH = CONFIG_DIR / "controller.yaml"
 NODES_PATH = STATE_DIR / "nodes.yaml"
 STATIC = Path(__file__).parent / "static"
+GPU_HISTORY_SECONDS = 3600  # how much per-GPU history /api/gpus keeps (in memory; lost on restart)
+MIN_GPU_VRAM_MB = 1024      # smaller "GPUs" are integrated graphics, not inference cards
+HIDDEN_GPU_VENDORS = {"amd"}  # AMD cards here only drive displays; models run on the NVIDIA cards
+
+
+def _inference_gpu(g: dict[str, Any]) -> bool:
+    """GPUs shown on the GPU page: not integrated graphics, not a display-only vendor."""
+    return (g.get("vram_total_mb") or 0) >= MIN_GPU_VRAM_MB and g.get("vendor") not in HIDDEN_GPU_VENDORS
 
 
 class Controller:
@@ -55,6 +63,8 @@ class Controller:
         for rec in (load_yaml(NODES_PATH).get("nodes") or []):
             self.nodes[rec["id"]] = {**rec, "online": False, "status": None, "misses": 0}
         self.events: collections.deque = collections.deque(maxlen=300)
+        # (node id, gpu index) -> deque of (unix time, temp C, util %, vram used MB)
+        self.gpu_history: dict[tuple[str, int], collections.deque] = {}
         self.litellm_ok = False
         self.last_sync: dict[str, Any] = {}
         self.last_scan: float | None = None
@@ -117,12 +127,40 @@ class Controller:
                            f"{st['name']}: {prev} -> {st['state']}" + (f" ({st['last_error']})"
                                                                          if st.get("last_error") else ""))
             rec.update(status=st, online=True, misses=0, name=st["name"], last_seen=time.time(), error=None)
+            self.record_gpus(rec["id"], st)
         except Exception as e:
             rec["misses"] = rec.get("misses", 0) + 1
             rec["error"] = str(e) or type(e).__name__
             if rec["online"] and rec["misses"] >= 3:
                 rec["online"] = False
                 self.event("alert", f"node {rec.get('name')} offline: {rec['error']}")
+
+    def record_gpus(self, nid: str, st: dict[str, Any]) -> None:
+        now = time.time()
+        maxlen = max(GPU_HISTORY_SECONDS // max(self.poll_interval, 1), 1) + 1
+        for g in st.get("gpus") or []:
+            if not _inference_gpu(g):
+                continue
+            q = self.gpu_history.setdefault((nid, int(g["index"])), collections.deque(maxlen=maxlen))
+            q.append((round(now), g.get("temp_c"), g.get("util_pct"), g.get("vram_used_mb")))
+
+    def gpus(self) -> list[dict[str, Any]]:
+        """Every inference GPU in the cluster: current reading plus its history."""
+        out = []
+        for rec in self.nodes.values():
+            st = rec.get("status") or {}
+            for g in st.get("gpus") or []:
+                if not _inference_gpu(g):
+                    continue
+                hist = list(self.gpu_history.get((rec["id"], int(g["index"])), ()))
+                out.append({
+                    "node_id": rec["id"], "node": rec.get("name"), "online": rec.get("online", False),
+                    "ip": st.get("ip"), "model": st.get("active"),
+                    **g,
+                    "history": {"t": [h[0] for h in hist], "temp_c": [h[1] for h in hist],
+                                "util_pct": [h[2] for h in hist], "vram_used_mb": [h[3] for h in hist]},
+                })
+        return out
 
     async def poll_loop(self) -> None:
         while True:
@@ -209,6 +247,17 @@ def create_app() -> FastAPI:
     def index():
         return FileResponse(STATIC / "index.html")
 
+    @app.get("/gpus")
+    def gpus_page():
+        return FileResponse(STATIC / "gpus.html")
+
+    # read-only and open on purpose (no admin token): GPU temperature/load for anyone on the LAN.
+    # The controller port is not exposed through the tunnel.
+    @app.get("/api/gpus")
+    def gpus():
+        return {"now": time.time(), "poll_interval": ctl.poll_interval, "history_seconds": GPU_HISTORY_SECONDS,
+                "gpus": ctl.gpus()}
+
     @app.get("/healthz")
     def healthz():
         return {"ok": True, "version": __version__}
@@ -277,6 +326,44 @@ def create_app() -> FastAPI:
     @app.post("/api/nodes/{nid}/download", dependencies=[auth])
     async def download(nid: str, body: dict):
         return await ctl.node_call(nid, "POST", "/download", body)
+
+    @app.delete("/api/nodes/{nid}/jobs/{job}", dependencies=[auth])
+    async def cancel_job(nid: str, job: str):
+        return await ctl.node_call(nid, "DELETE", f"/jobs/{job}")
+
+    @app.post("/api/nodes/{nid}/engine", dependencies=[auth])
+    async def engine_install(nid: str, body: dict):
+        return await ctl.node_call(nid, "POST", "/engine/install", body)
+
+    cache: dict[str, tuple[float, Any]] = {}
+
+    async def cached(key: str, ttl: int, fn, *args):
+        hit = cache.get(key)
+        if hit and time.time() - hit[0] < ttl:
+            return hit[1]
+        try:
+            val = await asyncio.to_thread(fn, *args)
+        except (hf.HFError, engine.EngineError) as e:
+            raise HTTPException(400, str(e)) from e
+        except httpx.HTTPError as e:
+            raise HTTPException(502, f"lookup failed: {e}") from e
+        cache[key] = (time.time(), val)
+        return val
+
+    @app.get("/api/catalog", dependencies=[auth])
+    def catalog():
+        return {"models": hf.load_catalog()}
+
+    @app.get("/api/hf/files", dependencies=[auth])
+    async def hf_files(repo: str, revision: str = "main"):
+        """GGUF files in a Hugging Face repo, grouped into downloadable models (split parts together)."""
+        files = await cached(f"hf:{repo}@{revision}", 600, hf.list_repo, repo, revision)
+        groups = hf.group_ggufs(files)
+        return {"repo": repo, "groups": [{k: g[k] for k in ("name", "paths", "size_gb", "mmproj")} for g in groups]}
+
+    @app.get("/api/engine/latest", dependencies=[auth])
+    async def engine_latest(flavor: str = "cuda-12"):
+        return {"tag": await cached(f"engine:{flavor}", 3600, engine.latest_tag, flavor)}
 
     @app.get("/api/nodes/{nid}/logs", dependencies=[auth])
     async def logs(nid: str):

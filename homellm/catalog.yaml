@@ -1,0 +1,142 @@
+# Curated GGUF models on Hugging Face that homellm nodes can download and run with llama-server.
+#
+# Add your own (or override one by name) in ~/.config/homellm/catalog.yaml on the main server and nodes:
+#
+#   models:
+#     - name: my-model            # profile name = model id clients ask for
+#       repo: owner/Some-GGUF     # Hugging Face repo
+#       quant: Q4_K_M             # file suffix to pick (split files are fetched together)
+#       mmproj: true              # also fetch the vision projector
+#       context: 32768
+#       parallel: 1
+#       args: [--flash-attn, "on"]
+#
+# vram_gb is a rough figure for the weights plus the listed context; it decides nothing, it is shown in the
+# dashboard so you can pick models that fit a node.
+
+models:
+  # ---- Gemma 4 ------------------------------------------------------------------------------------------------
+  - name: gemma-4-26b-a4b
+    repo: unsloth/gemma-4-26B-A4B-it-GGUF
+    quant: UD-Q4_K_XL
+    mmproj: true
+    context: 50176
+    parallel: 2
+    vram_gb: 21
+    tags: [chat, vision, moe]
+    notes: Mixture of experts (4B active), fast on a single 24 GB card.
+    args: [--flash-attn, "on", --cache-type-k, q8_0, --cache-type-v, q8_0, --ctx-checkpoints, "4"]
+  - name: gemma-4-31b
+    repo: unsloth/gemma-4-31B-it-GGUF
+    quant: Q4_K_M
+    context: 16384
+    vram_gb: 22
+    tags: [chat, dense]
+    notes: Dense, slower than the 26B MoE, stronger on long reasoning.
+  - name: gemma-4-e4b
+    repo: unsloth/gemma-4-E4B-it-GGUF
+    quant: Q4_K_M
+    mmproj: true
+    context: 32768
+    parallel: 2
+    vram_gb: 7
+    tags: [chat, vision, small]
+    notes: Small; fits 8 GB cards.
+
+  # ---- Qwen ---------------------------------------------------------------------------------------------------
+  - name: qwen3.6-35b-a3b
+    repo: unsloth/Qwen3.6-35B-A3B-GGUF
+    quant: UD-Q4_K_XL
+    context: 32768
+    vram_gb: 24
+    tags: [chat, moe]
+    notes: MoE (3B active). Tight on 24 GB; lower the context if it does not load.
+  - name: qwen3.5-27b
+    repo: unsloth/Qwen3.5-27B-GGUF
+    quant: Q4_K_M
+    context: 16384
+    vram_gb: 20
+    tags: [chat, dense]
+  - name: qwen3.5-9b
+    repo: unsloth/Qwen3.5-9B-GGUF
+    quant: Q4_K_M
+    context: 32768
+    parallel: 2
+    vram_gb: 8
+    tags: [chat, small]
+  - name: qwen3-coder-30b-a3b
+    repo: unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF
+    quant: UD-Q4_K_XL
+    context: 32768
+    vram_gb: 21
+    tags: [code, moe]
+  - name: qwen3-30b-a3b-2507
+    repo: unsloth/Qwen3-30B-A3B-Instruct-2507-GGUF
+    quant: UD-Q4_K_XL
+    context: 32768
+    vram_gb: 21
+    tags: [chat, moe]
+  - name: qwen3-14b
+    repo: unsloth/Qwen3-14B-GGUF
+    quant: Q4_K_M
+    context: 32768
+    vram_gb: 12
+    tags: [chat, dense]
+  - name: qwen3-8b
+    repo: unsloth/Qwen3-8B-GGUF
+    quant: Q4_K_M
+    context: 32768
+    parallel: 2
+    vram_gb: 7
+    tags: [chat, small]
+
+  # ---- others -------------------------------------------------------------------------------------------------
+  - name: gpt-oss-20b
+    repo: ggml-org/gpt-oss-20b-GGUF
+    quant: MXFP4
+    context: 32768
+    parallel: 2
+    vram_gb: 14
+    tags: [chat, moe]
+    args: [--flash-attn, "on"]
+  - name: mistral-small-3.2-24b
+    repo: unsloth/Mistral-Small-3.2-24B-Instruct-2506-GGUF
+    quant: Q4_K_M
+    mmproj: true
+    context: 16384
+    vram_gb: 18
+    tags: [chat, vision, dense]
+  - name: devstral-small-2507
+    repo: unsloth/Devstral-Small-2507-GGUF
+    quant: Q4_K_M
+    context: 32768
+    vram_gb: 18
+    tags: [code, dense]
+  - name: gemma-3-27b
+    repo: unsloth/gemma-3-27b-it-GGUF
+    quant: Q4_K_M
+    mmproj: true
+    context: 16384
+    vram_gb: 20
+    tags: [chat, vision, dense]
+  - name: gemma-3-12b
+    repo: unsloth/gemma-3-12b-it-GGUF
+    quant: Q4_K_M
+    mmproj: true
+    context: 32768
+    vram_gb: 10
+    tags: [chat, vision]
+  - name: llama-3.1-8b
+    repo: unsloth/Llama-3.1-8B-Instruct-GGUF
+    quant: Q4_K_M
+    context: 32768
+    parallel: 2
+    vram_gb: 7
+    tags: [chat, small]
+  - name: phi-4-mini
+    repo: unsloth/Phi-4-mini-instruct-GGUF
+    quant: Q4_K_M
+    context: 32768
+    parallel: 2
+    vram_gb: 4
+    tags: [chat, small, cpu-ok]

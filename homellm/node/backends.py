@@ -2,20 +2,21 @@
 
 A *profile* is a named, ready-to-run model preset, e.g.
 
-    gemma-4-26b:
-      backend: lmstudio
-      model: google/gemma-4-26b-a4b
-      context: 50000
+    gemma-4-26b-a4b:
+      backend: llamacpp
+      model: gemma-4-26B-A4B-it-GGUF/gemma-4-26B-A4B-it-UD-Q4_K_XL.gguf   # relative to models_dir (~/.lmstudio/models)
+      context: 50176
       parallel: 2
+      args: [--flash-attn, "on"]
 
 The served model id (what LiteLLM and clients call) is the profile name.
 """
 
 from __future__ import annotations
 
-import json
 import logging
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -24,11 +25,12 @@ from typing import Any
 import httpx
 import psutil
 
-from ..common import expand
+from .. import engine
+from ..common import MODELS_DIR, expand
 
 log = logging.getLogger("homellm.node")
 
-# llama.cpp's server keeps a RAM prompt cache (default ~8 GB) that OOM-killed LM Studio on a 13 GB box.
+# llama.cpp's server keeps a RAM prompt cache (default ~8 GB) that OOM-killed the engine on a 13 GB box.
 NO_PROMPT_CACHE_ENV = {"LLAMA_ARG_CACHE_RAM": "0"}
 
 
@@ -75,6 +77,12 @@ class Backend:
     def server_pid(self) -> int | None:
         return None
 
+    def unavailable_reason(self) -> str:
+        return f"backend {self.name} not available on this node"
+
+    def engine_info(self) -> dict[str, Any]:
+        return {}
+
     def health(self) -> dict[str, Any]:
         """Extra diagnostics: RSS of the engine process, prompt-cache env, warnings."""
         pid = self.server_pid()
@@ -98,113 +106,6 @@ class Backend:
             return False
 
 
-class LMStudioBackend(Backend):
-    """Drives LM Studio through its `lms` CLI. LM Studio serves an OpenAI API on its own port."""
-
-    name = "lmstudio"
-
-    def __init__(self, cfg: dict[str, Any]):
-        super().__init__(cfg)
-        self.lms = expand(cfg.get("lms", "~/.lmstudio/bin/lms"))
-        self.server_cfg = Path(expand("~/.lmstudio/.internal/http-server-config.json"))
-
-    def _run(self, *args: str, timeout: int = 60) -> subprocess.CompletedProcess:
-        env = {**os.environ, **NO_PROMPT_CACHE_ENV}
-        return subprocess.run([self.lms, *args], capture_output=True, text=True, timeout=timeout, env=env)
-
-    def available(self) -> bool:
-        return bool(self.lms) and Path(self.lms).exists()
-
-    def port(self) -> int:
-        try:
-            return int(json.loads(self.server_cfg.read_text()).get("port", 1234))
-        except (OSError, ValueError):
-            return int(self.cfg.get("port", 1234))
-
-    def network_interface(self) -> str:
-        try:
-            return json.loads(self.server_cfg.read_text()).get("networkInterface", "127.0.0.1")
-        except (OSError, ValueError):
-            return "unknown"
-
-    def ensure_server(self) -> None:
-        r = self._run("server", "status")
-        if "running" not in (r.stdout + r.stderr).lower() or "not running" in (r.stdout + r.stderr).lower():
-            self._run("server", "start", "--port", str(self.port()), timeout=120)
-
-    def _json(self, *args: str) -> list[dict[str, Any]]:
-        r = self._run(*args, "--json")
-        try:
-            return json.loads(r.stdout or "[]")
-        except ValueError:
-            return []
-
-    def list_models(self) -> list[dict[str, Any]]:
-        return [
-            {
-                "backend": self.name,
-                "model": m.get("modelKey"),
-                "name": m.get("displayName") or m.get("modelKey"),
-                "size_gb": round((m.get("sizeBytes") or 0) / 1e9, 2),
-                "max_context": m.get("maxContextLength"),
-                "quant": (m.get("quantization") or {}).get("name"),
-            }
-            for m in self._json("ls")
-            if m.get("type") == "llm"
-        ]
-
-    def loaded(self) -> list[dict[str, Any]]:
-        return self._json("ps")
-
-    def is_ready(self, profile_name: str, profile: dict[str, Any]) -> bool:
-        for m in self.loaded():
-            if m.get("identifier") == profile_name and m.get("modelKey") == profile["model"]:
-                return str(m.get("status", "")).lower() in ("idle", "generating", "processingprompt", "")
-        return False
-
-    def start(self, profile_name: str, profile: dict[str, Any]) -> None:
-        self.ensure_server()
-        self._run("unload", "--all")
-        args = ["load", profile["model"], "--gpu", str(profile.get("gpu", "max")),
-                "--identifier", profile_name, "-y"]
-        if profile.get("context"):
-            args += ["--context-length", str(profile["context"])]
-        if profile.get("parallel"):
-            args += ["--parallel", str(profile["parallel"])]
-        r = self._run(*args, timeout=900)
-        if r.returncode != 0:
-            raise BackendError(f"lms load failed: {(r.stderr or r.stdout)[-400:]}")
-
-    def stop(self) -> None:
-        if self.available():
-            self._run("unload", "--all")
-
-    def server_pid(self) -> int | None:
-        best = None
-        for p in psutil.process_iter(["pid", "exe", "cmdline", "create_time"]):
-            try:
-                cmd = p.info["cmdline"] or []
-                if cmd and cmd[0].endswith("llama-server") and ".lmstudio" in cmd[0]:
-                    if best is None or p.info["create_time"] > best[1]:
-                        best = (p.info["pid"], p.info["create_time"])
-            except (psutil.Error, TypeError):
-                continue
-        return best[0] if best else None
-
-    def download(self, name: str) -> subprocess.Popen:
-        env = {**os.environ, **NO_PROMPT_CACHE_ENV}
-        return subprocess.Popen([self.lms, "get", name, "-y"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                text=True, env=env)
-
-    def health(self) -> dict[str, Any]:
-        out = super().health()
-        if self.network_interface() in ("127.0.0.1", "localhost"):
-            out["warnings"].append("LM Studio server only listens on localhost; enable 'Serve on local network'")
-        if out.get("pid") and out.get("prompt_cache_disabled") is False:
-            out["warnings"].append("LM Studio was started without LLAMA_ARG_CACHE_RAM=0; RAM can climb")
-        return out
-
-
 class LlamaCppBackend(Backend):
     """Runs upstream llama.cpp `llama-server` as a transient systemd user unit (own cgroup, survives agent
     restarts, memory limits enforced by systemd)."""
@@ -214,24 +115,62 @@ class LlamaCppBackend(Backend):
 
     def __init__(self, cfg: dict[str, Any]):
         super().__init__(cfg)
-        self.bin = expand(cfg.get("server_bin"))
-        self.models_dir = Path(expand(cfg.get("models_dir", "~/models")))
-        self.ld_library_path = [expand(p) for p in cfg.get("ld_library_path", [])]
+        # no server_bin (or "managed"): use homellm's own copy from `homellm engine install`
+        custom = cfg.get("server_bin")
+        self.managed = not custom or custom == "managed"
+        self._bin = None if self.managed else expand(custom)
+        self._ld = [expand(p) for p in cfg.get("ld_library_path", [])]
+        self.models_dir = Path(expand(cfg.get("models_dir", str(MODELS_DIR))))
+        self.extra_dirs = [Path(expand(p)) for p in cfg.get("extra_models_dirs", [])]
+
+    @property
+    def bin(self) -> str | None:
+        if not self.managed:
+            return self._bin
+        cur = engine.current()
+        return cur["server_bin"] if cur else None
+
+    @property
+    def ld_library_path(self) -> list[str]:
+        if self.managed:
+            cur = engine.current()
+            return [cur["dir"]] if cur else []
+        return self._ld
+
+    def engine_info(self) -> dict[str, Any]:
+        if self.managed:
+            return {"managed": True, **(engine.current() or {"missing": True})}
+        return {"managed": False, "server_bin": self._bin}
 
     def available(self) -> bool:
         return bool(self.bin) and Path(self.bin).exists() and shutil.which("systemd-run") is not None
+
+    def unavailable_reason(self) -> str:
+        if not shutil.which("systemd-run"):
+            return "systemd-run not found"
+        if self.managed:
+            return "llama-server not installed; run `homellm engine install` or press Update engine"
+        return f"llama-server not found at {self._bin}"
 
     def port(self) -> int:
         return int(self.cfg.get("port", 1236))
 
     def list_models(self) -> list[dict[str, Any]]:
-        if not self.models_dir.is_dir():
-            return []
-        return [
-            {"backend": self.name, "model": p.name, "name": p.stem, "size_gb": round(p.stat().st_size / 1e9, 2)}
-            for p in sorted(self.models_dir.rglob("*.gguf"))
-            if "mmproj" not in p.name.lower()
-        ]
+        """GGUF files in models_dir (as paths relative to it) and extra_models_dirs (absolute paths).
+        Only the first part of a split model is listed; llama-server finds the rest next to it."""
+        out = []
+        for root in [self.models_dir, *self.extra_dirs]:
+            if not root.is_dir():
+                continue
+            for p in sorted(root.rglob("*.gguf")):
+                n = p.name.lower()
+                if "mmproj" in n or "/mtp/" in str(p).lower() or re.search(r"-0000[2-9]-of-|-000[1-9]\d-of-", n):
+                    continue
+                size = sum(q.stat().st_size for q in p.parent.glob(re.sub(r"-00001-of-", "-*-of-", p.name)))
+                model = str(p.relative_to(self.models_dir)) if root == self.models_dir else str(p)
+                out.append({"backend": self.name, "model": model, "name": p.stem, "size_gb": round(size / 1e9, 2),
+                            "mmproj": [str(m) for m in sorted(p.parent.glob("*mmproj*.gguf"))]})
+        return out
 
     def _active(self) -> bool:
         r = subprocess.run(["systemctl", "--user", "is-active", self.UNIT], capture_output=True, text=True)
@@ -250,7 +189,8 @@ class LlamaCppBackend(Backend):
             model = self.models_dir / model
         if not model.exists():
             raise BackendError(f"model file not found: {model}")
-        cmd = [self.bin, "--model", str(model), "--alias", profile_name, "--host", "0.0.0.0",
+        server_bin = os.path.realpath(self.bin or "")
+        cmd = [server_bin, "--model", str(model), "--alias", profile_name, "--host", "0.0.0.0",
                "--port", str(self.port()), "-ngl", str(profile.get("gpu_layers", 999)), "--jinja"]
         if profile.get("context"):
             cmd += ["-c", str(profile["context"])]
@@ -263,7 +203,7 @@ class LlamaCppBackend(Backend):
         run = ["systemd-run", "--user", f"--unit={self.UNIT}", "--collect", "--quiet",
                "-p", "Restart=no", "--setenv=LLAMA_ARG_CACHE_RAM=0"]
         if self.ld_library_path:
-            run.append(f"--setenv=LD_LIBRARY_PATH={':'.join(self.ld_library_path)}")
+            run.append(f"--setenv=LD_LIBRARY_PATH={':'.join(os.path.realpath(p) for p in self.ld_library_path)}")
         for key in ("memory_high", "memory_max"):
             if self.cfg.get(key):
                 run += ["-p", f"{'MemoryHigh' if key == 'memory_high' else 'MemoryMax'}={self.cfg[key]}"]
@@ -288,7 +228,7 @@ class LlamaCppBackend(Backend):
         return r.stdout
 
 
-BACKENDS = {"lmstudio": LMStudioBackend, "llamacpp": LlamaCppBackend}
+BACKENDS = {"llamacpp": LlamaCppBackend}
 
 
 def build_backends(cfg: dict[str, Any]) -> dict[str, Backend]:
